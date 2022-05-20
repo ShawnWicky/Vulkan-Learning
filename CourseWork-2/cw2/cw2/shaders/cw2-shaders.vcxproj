@@ -90,6 +90,20 @@
       <Outputs>../../assets/cw2/shaders/default.vert.spv</Outputs>
       <Message>GLSLC: [VERT] '%(Filename)%(Extension)'</Message>
     </CustomBuild>
+    <CustomBuild Include="lightDirection.frag">
+      <FileType>Document</FileType>
+      <Command>IF NOT EXIST "$(SolutionDir)\assets\cw2\shaders" (mkdir "$(SolutionDir)\assets\cw2\shaders")
+"$(SolutionDir)/third_party/shaderc/win-x86_64/glslc.exe" -O -o "$(SolutionDir)/assets/cw2/shaders/%(Filename)%(Extension).spv" "%(Identity)"</Command>
+      <Outputs>../../assets/cw2/shaders/lightDirection.frag.spv</Outputs>
+      <Message>GLSLC: [FRAG] '%(Filename)%(Extension)'</Message>
+    </CustomBuild>
+    <CustomBuild Include="lightDirection.vert">
+      <FileType>Document</FileType>
+      <Command>IF NOT EXIST "$(SolutionDir)\assets\cw2\shaders" (mkdir "$(SolutionDir)\assets\cw2\shaders")
+"$(SolutionDir)/third_party/shaderc/win-x86_64/glslc.exe" -O -o "$(SolutionDir)/assets/cw2/shaders/%(Filename)%(Extension).spv" "%(Identity)"</Command>
+      <Outputs>../../assets/cw2/shaders/lightDirection.vert.spv</Outputs>
+      <Message>GLSLC: [VERT] '%(Filename)%(Extension)'</Message>
+    </CustomBuild>
     <CustomBuild Include="viewDirection.frag">
       <FileType>Document</FileType>
       <Command>IF NOT EXIST "$(SolutionDir)\assets\cw2\shaders" (mkdir "$(SolutionDir)\assets\cw2\shaders")
