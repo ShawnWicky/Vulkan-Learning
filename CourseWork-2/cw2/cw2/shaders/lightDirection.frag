@@ -23,5 +23,6 @@ layout(location = 0) out vec4 outColour;
 void main()
 {
 	vec3 lightDir = normalize(light.position - v2fPos); 
+	
 	outColour = vec4(lightDir, 1.f);
 }
