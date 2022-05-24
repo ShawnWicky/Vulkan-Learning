@@ -243,7 +243,6 @@ ColourMesh createObjBuffer(ModelData const& aCar, lut::VulkanContext const& aCon
 
 	for (int i = 0; i < aCar.meshes.size(); i++)
 	{
-
 		for (int j = 0; j < aCar.meshes[i].numberOfVertices; j++)
 		{
 			meshVertices.emplace_back(aCar.vertexPositions[aCar.meshes[i].vertexStartIndex + j]);
@@ -370,6 +369,11 @@ ColourMesh createObjBuffer(ModelData const& aCar, lut::VulkanContext const& aCon
 		temp.positions.emplace_back(std::move(vertexPosGPU));
 		temp.normals.emplace_back(std::move(vertexNormGPU));
 		temp.vertexCount.emplace_back(aCar.meshes[i].numberOfVertices);
+		
+		temp.diffuse.emplace_back(aCar.materials[aCar.meshes[i].materialIndex].diffuse);
+		temp.emissive.emplace_back(aCar.materials[aCar.meshes[i].materialIndex].emissive);
+		temp.specular.emplace_back(aCar.materials[aCar.meshes[i].materialIndex].specular);
+		temp.shininess.emplace_back(aCar.materials[aCar.meshes[i].materialIndex].shininess);
 
 		meshVertices.clear();
 		meshNormals.clear();

@@ -53,8 +53,9 @@ namespace
 
 		constexpr char const* kLightDirectionVert = SHADERDIR_ "lightDirection.vert.spv";
 		constexpr char const* kLightDirectionFrag = SHADERDIR_ "lightDirection.frag.spv";
-		//constexpr char const* kVertShaderPath = SHADERDIR_ "BlinnPhong.vert.spv";
-		//constexpr char const* kFragShaderPath = SHADERDIR_ "BlinnPhong.frag.spv";
+
+		constexpr char const* kBlinnPhongVertPath = SHADERDIR_ "BlinnPhong.vert.spv";
+		constexpr char const* kBlinnPhongFragPath = SHADERDIR_ "BlinnPhong.frag.spv";
 
 		//constexpr char const* kVertShaderPath = SHADERDIR_ "PBR.vert.spv";
 		//constexpr char const* kFragShaderPath = SHADERDIR_ "PBR.frag.spv";
@@ -88,6 +89,9 @@ namespace
 		bool normalDirection = true;
 		bool viewDirection = false;
 		bool lightDirection = false;
+
+		//For question 2.2
+		bool blinnPhong = false;
 	}
 
 	// Local types/structures:
@@ -95,15 +99,7 @@ namespace
 	/*
 	namespace glsl
 	{
-		struct MaterialUniform
-		{
-			// Note: must map to the std140 uniform interface in the fragment
-			// shader, so need to be careful about the packing/alignment here!
-			glm::vec4 emissive;
-			glm::vec4 diffuse;
-			glm::vec4 specular;
-			float shininess;
-		};
+		
 	}
 	*/
 	// For PBR (see PBR.frag):
@@ -179,6 +175,21 @@ namespace
 			glm::vec3 position;
 			glm::vec3 colour;
 		};
+
+		struct Ambient
+		{
+			glm::vec3 colour;
+		};
+
+		struct MaterialUniform
+		{
+			// Note: must map to the std140 uniform interface in the fragment
+			// shader, so need to be careful about the packing/alignment here!
+			glm::vec3 emissive;
+			glm::vec3 diffuse;
+			glm::vec3 specular;
+			float shininess;
+		};
 	}
 
 	///-----------------------------------------------------------------------
@@ -201,12 +212,17 @@ namespace
 	lut::RenderPass create_render_pass(lut::VulkanWindow const&);
 
 	lut::DescriptorSetLayout create_scene_descriptor_layout(lut::VulkanWindow const&);
+	lut::DescriptorSetLayout create_blinnPhong_descriptor_layout(lut::VulkanWindow const&);
 
-	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const&, VkDescriptorSetLayout);
+	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const&, VkDescriptorSetLayout, VkDescriptorSetLayout);
+
+    #pragma region 2.1
 	lut::Pipeline create_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
 	lut::Pipeline create_view_direction_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
 	lut::Pipeline create_light_direction_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
+	#pragma endregion
 
+	lut::Pipeline create_blinn_phong_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
 
 	std::tuple<lut::Image, lut::ImageView> create_depth_buffer(lut::VulkanWindow const&, lut::Allocator const&);
 
@@ -221,6 +237,8 @@ namespace
 		Camera& camera,
 		glsl::Light&,
 		glsl::SceneUniform&,
+		glsl::Ambient&,
+		glsl::MaterialUniform&,
 		std::uint32_t aFramebufferWidth,
 		std::uint32_t aFramebufferHeight
 	);
@@ -232,6 +250,7 @@ namespace
 		VkPipeline,
 		VkPipeline,
 		VkPipeline,
+		VkPipeline,
 		VkExtent2D const&,
 		//--------------------------------------
 		ColourMesh&,
@@ -240,10 +259,15 @@ namespace
 		//std::uint32_t aVertexCount,
 		VkBuffer aSceneUBO,
 		VkBuffer aLight,
+		VkBuffer aAmbient,
+		VkBuffer aMaterial,
 		glsl::SceneUniform const&,
 		glsl::Light const&,
+		glsl::Ambient const&,
+		glsl::MaterialUniform const&,
 		VkPipelineLayout,
-		VkDescriptorSet aSceneDescriptors
+		VkDescriptorSet aSceneDescriptors,
+		VkDescriptorSet aBlinnPhongDescriptors
 		//--------------------------------------
 	);
 	void submit_commands(
@@ -266,7 +290,7 @@ int main() try
 {
 	// Create Vulkan Window
 	auto window = lut::make_vulkan_window();
-
+	std::cout << sizeof(glsl::MaterialUniform) << std::endl;
 	glfwSetWindowUserPointer(window.window, nullptr);
 	//Set the input Mode
 	glfwSetInputMode(window.window, GLFW_CURSOR, NULL);
@@ -288,12 +312,14 @@ int main() try
 	//create scene descriptor set layout
 	//call create_scene_descriptor_layout
 	lut::DescriptorSetLayout sceneLayout = create_scene_descriptor_layout(window);
-
+	lut::DescriptorSetLayout blinnPhongLayout = create_blinnPhong_descriptor_layout(window);
 	//create pipeline layout
-	lut::PipelineLayout pipeLayout = create_pipeline_layout(window, sceneLayout.handle);
+	lut::PipelineLayout pipeLayout = create_pipeline_layout(window, sceneLayout.handle, blinnPhongLayout.handle);
 	lut::Pipeline pipe = create_pipeline(window, renderPass.handle, pipeLayout.handle);
 	lut::Pipeline viewPipe = create_view_direction_pipeline(window, renderPass.handle, pipeLayout.handle);
 	lut::Pipeline lightPipe = create_light_direction_pipeline(window, renderPass.handle, pipeLayout.handle);
+
+	lut::Pipeline blinnPhongPipe = create_blinn_phong_pipeline(window, renderPass.handle, pipeLayout.handle);
 	//create depth buffer
 	auto [depthBuffer, depthBufferView] = create_depth_buffer(window, allocator);
 	std::vector<lut::Framebuffer> framebuffers;
@@ -318,7 +344,7 @@ int main() try
 	//create descriptor pool
 	lut::DescriptorPool dpool = lut::create_descriptor_pool(window);
 
-#pragma region secene uniform and light buffer (with thier descriptorSets)
+#pragma region secene uniform, light and ambient buffer (with thier descriptorSets)
 	// create scene uniform buffer with lut::create_buffer()
 	lut::Buffer sceneUBO = lut::create_buffer(
 		allocator,
@@ -334,10 +360,17 @@ int main() try
 		VMA_MEMORY_USAGE_GPU_ONLY
 	);
 
+	lut::Buffer ambientBuffer = lut::create_buffer(
+		allocator,
+		sizeof(glsl::Ambient),
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VMA_MEMORY_USAGE_GPU_ONLY
+	);
+
 	// allocate descriptor set for uniform buffer
 	VkDescriptorSet sceneDescriptors = lut::alloc_desc_set(window, dpool.handle, sceneLayout.handle);
 	{
-		VkWriteDescriptorSet desc[2]{};
+		VkWriteDescriptorSet desc[3]{};
 		VkDescriptorBufferInfo sceneUboInfo{};
 		sceneUboInfo.buffer = sceneUBO.buffer;
 		sceneUboInfo.range = VK_WHOLE_SIZE;
@@ -345,6 +378,10 @@ int main() try
 		VkDescriptorBufferInfo lightInfo{};
 		lightInfo.buffer = lighting.buffer;
 		lightInfo.range = VK_WHOLE_SIZE;
+
+		VkDescriptorBufferInfo ambienInfo{};
+		ambienInfo.buffer = ambientBuffer.buffer;
+		ambienInfo.range = VK_WHOLE_SIZE;
 
 		desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		desc[0].dstSet = sceneDescriptors;
@@ -361,32 +398,45 @@ int main() try
 		desc[1].descriptorCount = 1;
 		desc[1].pBufferInfo = &lightInfo;
 
-		//initialize descriptor set with vkUpdateDescriptorSets
-		constexpr auto numSets = sizeof(desc) / sizeof(desc[0]);
-		vkUpdateDescriptorSets(window.device, numSets, desc, 0, nullptr);
-	}
-/*
-	VkDescriptorSet lightDescriptors = lut::alloc_desc_set(window, dpool.handle, sceneLayout.handle);
-	{
-		VkWriteDescriptorSet desc[1]{};
-		VkDescriptorBufferInfo lightInfo{};
-		lightInfo.buffer = lighting.buffer;
-		lightInfo.range = VK_WHOLE_SIZE;
-
-		desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		desc[0].dstSet = lightDescriptors;
-		desc[0].dstBinding = 1;
-		desc[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		desc[0].descriptorCount = 1;
-		desc[0].pBufferInfo = &lightInfo;
+		desc[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		desc[2].dstSet = sceneDescriptors;
+		desc[2].dstBinding = 2;
+		desc[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		desc[2].descriptorCount = 1;
+		desc[2].pBufferInfo = &ambienInfo;
 
 		//initialize descriptor set with vkUpdateDescriptorSets
 		constexpr auto numSets = sizeof(desc) / sizeof(desc[0]);
 		vkUpdateDescriptorSets(window.device, numSets, desc, 0, nullptr);
 	}
-	*/
 #pragma endregion
 
+#pragma region material buffer and descriptor set
+	lut::Buffer materialBuffer = lut::create_buffer(
+		allocator,
+		sizeof(glsl::MaterialUniform),
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VMA_MEMORY_USAGE_GPU_ONLY
+	);
+
+	VkDescriptorSet materialDescritpors = lut::alloc_desc_set(window, dpool.handle, blinnPhongLayout.handle);
+	{
+		VkWriteDescriptorSet desc[1]{};
+		VkDescriptorBufferInfo materialInfo{};
+		materialInfo.buffer = sceneUBO.buffer;
+		materialInfo.range = VK_WHOLE_SIZE;
+
+		desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		desc[0].dstSet = materialDescritpors;
+		desc[0].dstBinding = 0;
+		desc[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		desc[0].descriptorCount = 1;
+		desc[0].pBufferInfo = &materialInfo;
+
+		constexpr auto numSets = sizeof(desc) / sizeof(desc[0]);
+		vkUpdateDescriptorSets(window.device, numSets, desc, 0, nullptr);
+	}
+#pragma endregion
 	bool recreateSwapchain = false;
 
 	while (!glfwWindowShouldClose(window.window))
@@ -462,7 +512,9 @@ int main() try
 
 		glsl::SceneUniform sceneUniforms{};
 		glsl::Light lightUniforms{};
-		update_scene_uniforms(camera, lightUniforms, sceneUniforms, window.swapchainExtent.width, window.swapchainExtent.height);
+		glsl::Ambient ambientUniforms{};
+		glsl::MaterialUniform materialUniforms{};
+		update_scene_uniforms(camera, lightUniforms, sceneUniforms, ambientUniforms, materialUniforms, window.swapchainExtent.width, window.swapchainExtent.height);
 
 		// record and submit commands
 		assert(std::size_t(imageIndex) < cbuffers.size());
@@ -475,14 +527,20 @@ int main() try
 			pipe.handle,
 			viewPipe.handle,
 			lightPipe.handle,
+			blinnPhongPipe.handle,
 			window.swapchainExtent,
 			mateiralMesh,
 			sceneUBO.buffer,
 			lighting.buffer,
+			ambientBuffer.buffer,
+			materialBuffer.buffer,
 			sceneUniforms,
 			lightUniforms,
+			ambientUniforms,
+			materialUniforms,
 			pipeLayout.handle,
-			sceneDescriptors
+			sceneDescriptors,
+			materialDescritpors
 		);
 
 		submit_commands(
@@ -531,18 +589,28 @@ namespace
 			cfg::normalDirection = true;
 			cfg::viewDirection = false;
 			cfg::lightDirection = false;
+			cfg::blinnPhong = false;
 		}
 		else if (GLFW_KEY_2 == aKey && GLFW_PRESS == aAction)
 		{
 			cfg::viewDirection = true;
 			cfg::normalDirection = false;
 			cfg::lightDirection = false;
+			cfg::blinnPhong = false;
 		}
 		else if (GLFW_KEY_3 == aKey && GLFW_PRESS == aAction)
 		{
 			cfg::lightDirection = true;
 			cfg::normalDirection = false;
 			cfg::viewDirection = false;
+			cfg::blinnPhong = false;
+		}
+		else if (GLFW_KEY_4 == aKey && GLFW_PRESS == aAction)
+		{
+			cfg::blinnPhong = true;
+			cfg::normalDirection = false;
+			cfg::viewDirection = false;
+			cfg::lightDirection = false;
 		}
 		// forward/backward
 		if (glfwGetKey(aWindow, GLFW_KEY_W) == GLFW_PRESS)
@@ -613,7 +681,13 @@ namespace
 		}
 	}
 
-	void update_scene_uniforms(Camera& camera, glsl::Light& aLight, glsl::SceneUniform& aSceneUniforms, std::uint32_t aFramebufferWidth, std::uint32_t aFramebufferHeight)
+	void update_scene_uniforms( Camera& camera,
+								glsl::Light& aLight, 
+								glsl::SceneUniform& aSceneUniforms, 
+								glsl::Ambient& aAmbientUniforms,
+								glsl::MaterialUniform& aMaterialUniforms,
+								std::uint32_t aFramebufferWidth, 
+								std::uint32_t aFramebufferHeight)
 	{
 		//initilize SceneUniform members
 		float const aspect = aFramebufferWidth / float(aFramebufferHeight);
@@ -633,6 +707,9 @@ namespace
 		//Light
 		aLight.position = glm::vec3(0.f, 9.3f, -3.f);
 		aLight.colour = glm::vec3(1.f, 1.f, 0.8f);
+
+		//Ambient
+		aAmbientUniforms.colour = glm::vec3(1.f, 1.f, 1.f);
 	}
 }
 
@@ -693,10 +770,10 @@ namespace
 		return lut::RenderPass(aWindow.device, rpass);
 	}
 
-	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const& aContext, VkDescriptorSetLayout aSceneLayout)
+	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const& aContext, VkDescriptorSetLayout aSceneLayout, VkDescriptorSetLayout aBlinnPhongLayout)
 	{
 
-		VkDescriptorSetLayout layouts[] = { aSceneLayout};
+		VkDescriptorSetLayout layouts[] = { aSceneLayout, aBlinnPhongLayout};
 
 		//Creating the pipeline layout
 		VkPipelineLayoutCreateInfo layoutInfo{};
@@ -713,6 +790,7 @@ namespace
 		}
 		return lut::PipelineLayout(aContext.device, layout);
 	}
+
 #pragma region 2.1
 	lut::Pipeline create_pipeline(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, VkPipelineLayout aPipelineLayout)
 	{
@@ -1032,13 +1110,13 @@ namespace
 		stages[1].pName = "main";
 
 		//----------------------------------------------------VkPipelineVertexInputStateCreateInfo
-		VkVertexInputBindingDescription vertexInputs[2]{};
+		VkVertexInputBindingDescription vertexInputs[1]{};
 		//position
 		vertexInputs[0].binding = 0;
 		vertexInputs[0].stride = sizeof(float) * 3;
 		vertexInputs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-		VkVertexInputAttributeDescription vertexAttributes[2]{};
+		VkVertexInputAttributeDescription vertexAttributes[1]{};
 		//position
 		vertexAttributes[0].binding = 0;
 		vertexAttributes[0].location = 0;
@@ -1149,6 +1227,157 @@ namespace
 		return lut::Pipeline(aWindow.device, pipe);
 	}
 #pragma endregion
+
+#pragma region 2.2
+	lut::Pipeline create_blinn_phong_pipeline(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, VkPipelineLayout aPipelineLayout)
+	{
+		//first step  : load shader modules
+		lut::ShaderModule vert = lut::load_shader_module(aWindow, cfg::kBlinnPhongVertPath);
+		lut::ShaderModule frag = lut::load_shader_module(aWindow, cfg::kBlinnPhongFragPath);
+
+		//Shader stages in the pipeline
+		//We need two here, vert and frag
+		VkPipelineShaderStageCreateInfo  stages[2]{};
+		//vertex  [0]
+		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+		stages[0].module = vert.handle;
+		stages[0].pName = "main";
+
+		//fragment [1]
+		stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		stages[1].module = frag.handle;
+		stages[1].pName = "main";
+
+		//----------------------------------------------------VkPipelineVertexInputStateCreateInfo
+		VkVertexInputBindingDescription vertexInputs[2]{};
+		//position
+		vertexInputs[0].binding = 0;
+		vertexInputs[0].stride = sizeof(float) * 3;
+		vertexInputs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+		vertexInputs[1].binding = 1;
+		vertexInputs[1].stride = sizeof(float) * 3;
+		vertexInputs[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+		VkVertexInputAttributeDescription vertexAttributes[2]{};
+		//position
+		vertexAttributes[0].binding = 0;
+		vertexAttributes[0].location = 0;
+		vertexAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+		vertexAttributes[0].offset = 0;
+
+		vertexAttributes[1].binding = 1;
+		vertexAttributes[1].location = 1;
+		vertexAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+		vertexAttributes[1].offset = 0;
+		//----------------------------------------------------VkPipelineVertexInputStateCreateInfo 
+
+		VkPipelineVertexInputStateCreateInfo inputInfo{};
+		inputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+		inputInfo.vertexBindingDescriptionCount = 2;
+		inputInfo.pVertexBindingDescriptions = vertexInputs;
+		inputInfo.vertexAttributeDescriptionCount = 2;
+		inputInfo.pVertexAttributeDescriptions = vertexAttributes;
+
+
+		//for rasterization
+		VkPipelineInputAssemblyStateCreateInfo assemblyInfo{};
+		assemblyInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		assemblyInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		assemblyInfo.primitiveRestartEnable = VK_FALSE;
+
+		//todo list...   Tessellation State   not now
+
+		//viewport state
+		VkViewport viewport{};
+		viewport.x = 0.0f;
+		viewport.y = 0.0f;
+		viewport.width = float(aWindow.swapchainExtent.width);
+		viewport.height = float(aWindow.swapchainExtent.height);
+		viewport.minDepth = 0.0f;
+		viewport.maxDepth = 1.0f;
+
+		VkRect2D scissor{};
+		scissor.extent = VkExtent2D{ aWindow.swapchainExtent.width,
+									 aWindow.swapchainExtent.height };
+		scissor.offset = VkOffset2D{ 0,0 };
+
+		VkPipelineViewportStateCreateInfo viewportInfo{};
+		viewportInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportInfo.viewportCount = 1;
+		viewportInfo.pViewports = &viewport;
+		viewportInfo.scissorCount = 1;
+		viewportInfo.pScissors = &scissor;
+
+		//Rasterization State
+		VkPipelineRasterizationStateCreateInfo rasterInfo{};
+		rasterInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterInfo.depthClampEnable = VK_FALSE;
+		rasterInfo.rasterizerDiscardEnable = VK_FALSE;
+		rasterInfo.polygonMode = VK_POLYGON_MODE_FILL;
+		rasterInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+		rasterInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;  // like OpenGL
+		rasterInfo.depthBiasEnable = VK_FALSE;
+		rasterInfo.lineWidth = 1.0f;
+
+
+		//Mulitisampling 
+		VkPipelineMultisampleStateCreateInfo sampleInfo{};
+		sampleInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		sampleInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+		//Depth/Stencil State    not now
+		VkPipelineDepthStencilStateCreateInfo depthInfo{};
+		depthInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthInfo.depthTestEnable = VK_TRUE;
+		depthInfo.depthWriteEnable = VK_TRUE;
+		depthInfo.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+		depthInfo.minDepthBounds = 0.f;
+		depthInfo.maxDepthBounds = 1.f;
+
+		//Color Blend State  
+			//mask 
+		VkPipelineColorBlendAttachmentState blendStates[1]{};
+		blendStates[0].blendEnable = VK_FALSE;
+		blendStates[0].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+		VkPipelineColorBlendStateCreateInfo blendInfo{};
+		blendInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		blendInfo.attachmentCount = 1;
+		blendInfo.pAttachments = blendStates;
+
+		//Dynamic States  not now
+
+		//Create pipeline
+		VkGraphicsPipelineCreateInfo pipelineInfo{};
+		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		pipelineInfo.stageCount = 2;  //vert frag
+		pipelineInfo.pStages = stages;
+		pipelineInfo.pVertexInputState = &inputInfo;
+		pipelineInfo.pInputAssemblyState = &assemblyInfo;
+		pipelineInfo.pViewportState = &viewportInfo;
+		pipelineInfo.pRasterizationState = &rasterInfo;
+		pipelineInfo.pMultisampleState = &sampleInfo;
+		pipelineInfo.pColorBlendState = &blendInfo;
+		pipelineInfo.layout = aPipelineLayout;
+		pipelineInfo.renderPass = aRenderPass;
+		pipelineInfo.subpass = 0;
+		pipelineInfo.pTessellationState = nullptr;
+		pipelineInfo.pDepthStencilState = &depthInfo;
+		pipelineInfo.pDynamicState = nullptr;
+
+		VkPipeline pipe = VK_NULL_HANDLE;
+		if (auto const res = vkCreateGraphicsPipelines(aWindow.device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipe); VK_SUCCESS != res)
+		{
+			throw lut::Error("Unable to create graphics pipeline\n" "vkCreateGraphicsPipelines() returned %s", lut::to_string(res).c_str());
+		}
+
+		return lut::Pipeline(aWindow.device, pipe);
+	}
+#pragma endregion 
+
+
 	void create_swapchain_framebuffers(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, std::vector<lut::Framebuffer>& aFramebuffers, VkImageView aDepthView)
 	{
 		assert(aFramebuffers.empty());
@@ -1183,7 +1412,7 @@ namespace
 
 	lut::DescriptorSetLayout create_scene_descriptor_layout(lut::VulkanWindow const& aWindow)
 	{
-		VkDescriptorSetLayoutBinding bindings[2]{};
+		VkDescriptorSetLayoutBinding bindings[3]{};
 		bindings[0].binding = 0;
 		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		bindings[0].descriptorCount = 1;
@@ -1192,7 +1421,34 @@ namespace
 		bindings[1].binding = 1;
 		bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		bindings[1].descriptorCount = 1;
-		bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+		bindings[2].binding = 2;
+		bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		bindings[2].descriptorCount = 1;
+		bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		//descriptor set layout
+		VkDescriptorSetLayoutCreateInfo layoutInfo{};
+		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		layoutInfo.bindingCount = sizeof(bindings) / sizeof(bindings[0]);
+		layoutInfo.pBindings = bindings;
+
+		VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+		if (auto const res = vkCreateDescriptorSetLayout(aWindow.device, &layoutInfo, nullptr, &layout); VK_SUCCESS != res)
+		{
+			throw lut::Error("Unable to create descriptor set layout\n" "vkCreateDescriptorSetLayout() returned %s", lut::to_string(res).c_str());
+		}
+
+		return lut::DescriptorSetLayout(aWindow.device, layout);
+	}
+
+	lut::DescriptorSetLayout create_blinnPhong_descriptor_layout(lut::VulkanWindow const& aWindow)
+	{
+		VkDescriptorSetLayoutBinding bindings[1]{};
+		bindings[0].binding = 0;
+		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		bindings[0].descriptorCount = 1;
+		bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
 		//descriptor set layout
 		VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -1216,14 +1472,20 @@ namespace
 		VkPipeline aGraphicsPipe,
 		VkPipeline aViewPipe,
 		VkPipeline alightPipe,
+		VkPipeline aBlinnPhongPipe,
 		VkExtent2D const& aImageExtent,
 		ColourMesh& aColourMesh,
 		VkBuffer aSceneUBO,
 		VkBuffer aLight,
+		VkBuffer aAmbient,
+		VkBuffer aMaterial,
 		glsl::SceneUniform const& aSceneUniform,
 		glsl::Light const& aLightUniform,
+		glsl::Ambient const& aAmbientUniform,
+		glsl::MaterialUniform const& aMaterialUniform,
 		VkPipelineLayout aGraphicsLayout,
-		VkDescriptorSet aSceneDescriptors
+		VkDescriptorSet aSceneDescriptors,
+		VkDescriptorSet aMaterialDescriptors
 		///------------------------------------
 	)
 		//	VkDescriptorSet aObjectDescriptors, VkBuffer aSpritePosBuffer, VkBuffer aSpriteTexBuffer, std::uint32_t aSpriteVertexCount, VkDescriptorSet aSpriteObjDescriptors)
@@ -1248,7 +1510,14 @@ namespace
 		vkCmdUpdateBuffer(aCmdBuff, aLight, 0, sizeof(glsl::Light), &aLightUniform);
 		lut::buffer_barrier(aCmdBuff, aLight, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
-
+		lut::buffer_barrier(aCmdBuff, aAmbient, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+		vkCmdUpdateBuffer(aCmdBuff, aLight, 0, sizeof(glsl::Ambient), &aAmbientUniform);
+		lut::buffer_barrier(aCmdBuff, aAmbient, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+		
+		lut::buffer_barrier(aCmdBuff, aMaterial, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+		vkCmdUpdateBuffer(aCmdBuff, aLight, 0, sizeof(glsl::MaterialUniform), &aMaterialUniform);
+		lut::buffer_barrier(aCmdBuff, aMaterial, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+		
 		//Render Pass
 		VkClearValue clearValues[2]{};
 		clearValues[0].color.float32[0] = 0.1f;
@@ -1268,15 +1537,23 @@ namespace
 
 		vkCmdBeginRenderPass(aCmdBuff, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		//drawing with pipeline
-		if (cfg::normalDirection)
-			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsPipe);	
-		if (cfg::viewDirection)
-			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aViewPipe);
-		if (cfg::lightDirection)
-			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, alightPipe);
+		{
+			//drawing with pipeline
+			if (cfg::normalDirection)
+				vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsPipe);
+			if (cfg::viewDirection)
+				vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aViewPipe);
+			if (cfg::lightDirection)
+				vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, alightPipe);
 
-		vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 0, 1, &aSceneDescriptors, 0, nullptr);
+			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 0, 1, &aSceneDescriptors, 0, nullptr);
+		}
+			//----------------------------------
+		if (cfg::blinnPhong)
+		{
+			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aBlinnPhongPipe);
+			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 0, 1, &aMaterialDescriptors, 0, nullptr);
+		}
 		// Bind vertex input
 		for (int i = 0; i < aColourMesh.positions.size(); i++)
 		{
@@ -1287,7 +1564,6 @@ namespace
 			vkCmdBindVertexBuffers(aCmdBuff, 0, 2, buffers, offsets);
 			vkCmdDraw(aCmdBuff, aColourMesh.vertexCount[i], 1, 0, 0);
 		}
-		//----------------------------------
 
 		vkCmdEndRenderPass(aCmdBuff);
 		//end recording

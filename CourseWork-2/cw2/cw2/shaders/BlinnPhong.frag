@@ -4,9 +4,9 @@
 
 layout( set = 1, binding = 0, std140 ) uniform UMaterial
 {
-	vec4 emissive;
-	vec4 diffuse;
-	vec4 specular;
+	vec3 emissive;
+	vec3 diffuse;
+	vec3 specular;
 	float shininess; // Last to make std140 alignment easier.
 } uMaterial;
 
@@ -51,14 +51,15 @@ void main()
 	//diffuse
 	vec3 normal = normalize(v2fNormal);
 	vec3 lightDir = normalize(light.position - v2fPos);
-	const float PI = 3.1415926;
-	vec3 Cdiff = dot(normal, lightDir) + diffuse * light.colour / PI;
+	const float PI = 3.1415926f;
+	vec3 Cdiff = max(0.f, dot(normal, lightDir)) + diffuse * light.colour / PI;
 
 	//specular
 	vec3 viewDir = normalize(uScene.camPos - v2fPos);
 	float shinessFactor = (uMaterial.shininess + 2.f) / 8.f;
-	vec3 Cspec = 
+	vec3 halfwayDir = normalize(lightDir + viewDir);
+	float Pspec = shinessFactor * (pow(max(dot(normal, halfwayDir), 0.f),uMaterial.shininess));
+	vec3 Cspec = Pspec * max(0.f,dot(normal, lightDir)) * vec3(uMaterial.specular.xyz) * light.colour;
 
-
-	vec3 specular = 
+	outColour = vec4((Cemit + Camibent + Cdiff + Cspec),1.f);
 }
