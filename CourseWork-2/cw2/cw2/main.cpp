@@ -219,6 +219,8 @@ namespace
 
 	lut::Pipeline create_blinn_phong_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
 
+	void pass_data_to_material_uniform(lut::Allocator const& allocator, glsl::MaterialUniform& materialUniform, ColourMesh& aMesh, ModelData& aData);
+
 	std::tuple<lut::Image, lut::ImageView> create_depth_buffer(lut::VulkanWindow const&, lut::Allocator const&);
 
 	void create_swapchain_framebuffers(
@@ -397,7 +399,7 @@ int main() try
 	{
 		VkWriteDescriptorSet desc[1]{};
 		VkDescriptorBufferInfo materialInfo{};
-		materialInfo.buffer = sceneUBO.buffer;
+		materialInfo.buffer = materialBuffer.buffer;
 		materialInfo.range = VK_WHOLE_SIZE;
 
 		desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -677,8 +679,6 @@ namespace
 		//Light
 		aLight.position = glm::vec3(0.f, 9.3f, -3.f);
 		aLight.colour = glm::vec3(1.f, 1.f, 0.8f);
-
-		aMaterialUniforms.emissive = glm::vec4(1.f, 1.f, 1.f, 1.f);
 	}
 }
 
@@ -1346,6 +1346,30 @@ namespace
 	}
 #pragma endregion 
 
+	void pass_data_to_material_uniform(lut::Allocator const& aAllocator, glsl::MaterialUniform& materialUniform, ColourMesh& aMesh, ModelData& aData)
+	{
+		glsl::MaterialUniform temp;
+		for (int i = 0; i < aData.meshes.size(); i++)
+		{
+			temp.diffuse = glm::vec4(aData.materials[aData.meshes[i].materialIndex].diffuse, 1.f);
+			temp.emissive = glm::vec4(aData.materials[aData.meshes[i].materialIndex].emissive, 1.f);
+			temp.specular = glm::vec4(aData.materials[aData.meshes[i].materialIndex].specular, 1.f);
+			temp.shininess = aData.materials[aData.meshes[i].materialIndex].shininess;
+
+			auto& staging = lut::create_buffer(aAllocator, sizeof(glsl::MaterialUniform), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+			void* sptr = nullptr;
+
+			if(auto const res = vmaMapMemory(aAllocator.allocator, staging.allocation, &sptr); VK_SUCCESS != res)
+			{
+				throw lut::Error("Mapping memory for writing\n" "vmaMapMemory() returned %s", lut::to_string(res).c_str());
+			}
+
+			std::memcpy(sptr, &temp, sizeof(temp));
+			vmaUnmapMemory(aAllocator.allocator, staging.allocation);
+		}
+
+	}
 
 	void create_swapchain_framebuffers(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, std::vector<lut::Framebuffer>& aFramebuffers, VkImageView aDepthView)
 	{
@@ -1477,10 +1501,10 @@ namespace
 		vkCmdUpdateBuffer(aCmdBuff, aLight, 0, sizeof(glsl::Light), &aLightUniform);
 		lut::buffer_barrier(aCmdBuff, aLight, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
+
 		lut::buffer_barrier(aCmdBuff, aMaterial, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 		vkCmdUpdateBuffer(aCmdBuff, aMaterial, 0, sizeof(glsl::MaterialUniform), &aMaterialUniform);
 		lut::buffer_barrier(aCmdBuff, aMaterial, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-		
 		//Render Pass
 		VkClearValue clearValues[2]{};
 		clearValues[0].color.float32[0] = 0.1f;
@@ -1521,7 +1545,7 @@ namespace
 		if (cfg::blinnPhong)
 		{
 			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aBlinnPhongPipe);
-			
+			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 1, 1, &aMaterialDescriptors, 0, nullptr);
 		}
 		// Bind vertex input
 		for (int i = 0; i < aColourMesh.positions.size(); i++)
@@ -1531,13 +1555,12 @@ namespace
 			VkBuffer buffers[2] = { pos[i].buffer, norm[i].buffer };
 			VkDeviceSize offsets[2]{};
 			vkCmdBindVertexBuffers(aCmdBuff, 0, 2, buffers, offsets);
-
-			std::cout << glm::to_string(glm::vec4(aColourMesh.emissive[i], 1.0f)) << std::endl;
-			aMaterialUniform.diffuse = glm::vec4(aColourMesh.diffuse[i], 1.0f);
-			aMaterialUniform.emissive = glm::vec4(aColourMesh.emissive[i], 1.0f);
-			aMaterialUniform.specular = glm::vec4(aColourMesh.specular[i], 1.0f);
+			
+			aMaterialUniform.diffuse = glm::vec4(aColourMesh.diffuse[i], 1.f);
 			aMaterialUniform.shininess = aColourMesh.shininess[i];
-			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 1, 1, &aMaterialDescriptors, 0, nullptr);
+			aMaterialUniform.specular = glm::vec4(aColourMesh.specular[i], 1.f);
+			aMaterialUniform.emissive = glm::vec4(aColourMesh.emissive[i], 1.f);
+
 			vkCmdDraw(aCmdBuff, aColourMesh.vertexCount[i], 1, 0, 0);
 		}
 
