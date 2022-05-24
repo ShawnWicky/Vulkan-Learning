@@ -4,9 +4,9 @@
 
 layout( set = 1, binding = 0, std140 ) uniform UMaterial
 {
-	vec3 emissive;
-	vec3 diffuse;
-	vec3 specular;
+	vec4 emissive;
+	vec4 diffuse;
+	vec4 specular;
 	float shininess; // Last to make std140 alignment easier.
 } uMaterial;
 
@@ -19,17 +19,11 @@ layout(set = 0, binding = 0) uniform UScene
 			vec3 camPos;
 } uScene;
 
-layout(set = 0, binding = 1) uniform Light
+layout(set = 0, binding = 1, std140) uniform Light
 {
 	vec3 position;
 	vec3 colour;
 } light;
-
-layout(set = 0, binding = 2) uniform Ambient
-{
-	vec3 colour;
-} ambient;
-
 
 // In and Out
 layout(location = 0) in vec3 v2fPos;
@@ -41,12 +35,15 @@ layout(location = 0) out vec4 outColour;
 
 void main()
 {
+
+	//ambient colour
+	vec3 ambient = vec3(0.1f, 0.1f, 0.1f);
 	//emit
 	vec3 Cemit = vec3(uMaterial.emissive.xyz);
 
 	//diffuse * ambient
 	vec3 diffuse = vec3(uMaterial.diffuse.xyz);
-	vec3 Camibent = diffuse * ambient.colour;
+	vec3 Camibent = diffuse * ambient;
 
 	//diffuse
 	vec3 normal = normalize(v2fNormal);
@@ -62,4 +59,5 @@ void main()
 	vec3 Cspec = Pspec * max(0.f,dot(normal, lightDir)) * vec3(uMaterial.specular.xyz) * light.colour;
 
 	outColour = vec4((Cemit + Camibent + Cdiff + Cspec),1.f);
+	outColour = vec4(Cemit,1.f);
 }

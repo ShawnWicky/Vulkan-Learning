@@ -172,22 +172,17 @@ namespace
 
 		struct Light
 		{
-			glm::vec3 position;
-			glm::vec3 colour;
-		};
-
-		struct Ambient
-		{
-			glm::vec3 colour;
+			alignas(16) glm::vec3 position;
+			alignas(16) glm::vec3 colour;
 		};
 
 		struct MaterialUniform
 		{
 			// Note: must map to the std140 uniform interface in the fragment
 			// shader, so need to be careful about the packing/alignment here!
-			glm::vec3 emissive;
-			glm::vec3 diffuse;
-			glm::vec3 specular;
+			glm::vec4 emissive;
+			glm::vec4 diffuse;
+			glm::vec4 specular;
 			float shininess;
 		};
 	}
@@ -237,7 +232,6 @@ namespace
 		Camera& camera,
 		glsl::Light&,
 		glsl::SceneUniform&,
-		glsl::Ambient&,
 		glsl::MaterialUniform&,
 		std::uint32_t aFramebufferWidth,
 		std::uint32_t aFramebufferHeight
@@ -259,12 +253,10 @@ namespace
 		//std::uint32_t aVertexCount,
 		VkBuffer aSceneUBO,
 		VkBuffer aLight,
-		VkBuffer aAmbient,
 		VkBuffer aMaterial,
 		glsl::SceneUniform const&,
 		glsl::Light const&,
-		glsl::Ambient const&,
-		glsl::MaterialUniform const&,
+		glsl::MaterialUniform&,
 		VkPipelineLayout,
 		VkDescriptorSet aSceneDescriptors,
 		VkDescriptorSet aBlinnPhongDescriptors
@@ -290,14 +282,13 @@ int main() try
 {
 	// Create Vulkan Window
 	auto window = lut::make_vulkan_window();
-	std::cout << sizeof(glsl::MaterialUniform) << std::endl;
+	
 	glfwSetWindowUserPointer(window.window, nullptr);
 	//Set the input Mode
 	glfwSetInputMode(window.window, GLFW_CURSOR, NULL);
 
 	// Configure the GLFW window
 	glfwSetKeyCallback(window.window, &glfw_callback_key_press);
-
 
 	glfwSetMouseButtonCallback(window.window, &glfw_callback_mouse_button);
 
@@ -339,7 +330,7 @@ int main() try
 	lut::Semaphore imageAvailable = lut::create_semaphore(window);
 	lut::Semaphore renderFinished = lut::create_semaphore(window);
 
-	ColourMesh mateiralMesh = createObjBuffer(materialTest, window, allocator);
+	ColourMesh mateiralMesh = createObjBuffer(newShip, window, allocator);
 
 	//create descriptor pool
 	lut::DescriptorPool dpool = lut::create_descriptor_pool(window);
@@ -360,17 +351,10 @@ int main() try
 		VMA_MEMORY_USAGE_GPU_ONLY
 	);
 
-	lut::Buffer ambientBuffer = lut::create_buffer(
-		allocator,
-		sizeof(glsl::Ambient),
-		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-		VMA_MEMORY_USAGE_GPU_ONLY
-	);
-
 	// allocate descriptor set for uniform buffer
 	VkDescriptorSet sceneDescriptors = lut::alloc_desc_set(window, dpool.handle, sceneLayout.handle);
 	{
-		VkWriteDescriptorSet desc[3]{};
+		VkWriteDescriptorSet desc[2]{};
 		VkDescriptorBufferInfo sceneUboInfo{};
 		sceneUboInfo.buffer = sceneUBO.buffer;
 		sceneUboInfo.range = VK_WHOLE_SIZE;
@@ -379,9 +363,6 @@ int main() try
 		lightInfo.buffer = lighting.buffer;
 		lightInfo.range = VK_WHOLE_SIZE;
 
-		VkDescriptorBufferInfo ambienInfo{};
-		ambienInfo.buffer = ambientBuffer.buffer;
-		ambienInfo.range = VK_WHOLE_SIZE;
 
 		desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		desc[0].dstSet = sceneDescriptors;
@@ -397,13 +378,6 @@ int main() try
 		desc[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		desc[1].descriptorCount = 1;
 		desc[1].pBufferInfo = &lightInfo;
-
-		desc[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		desc[2].dstSet = sceneDescriptors;
-		desc[2].dstBinding = 2;
-		desc[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		desc[2].descriptorCount = 1;
-		desc[2].pBufferInfo = &ambienInfo;
 
 		//initialize descriptor set with vkUpdateDescriptorSets
 		constexpr auto numSets = sizeof(desc) / sizeof(desc[0]);
@@ -512,9 +486,8 @@ int main() try
 
 		glsl::SceneUniform sceneUniforms{};
 		glsl::Light lightUniforms{};
-		glsl::Ambient ambientUniforms{};
 		glsl::MaterialUniform materialUniforms{};
-		update_scene_uniforms(camera, lightUniforms, sceneUniforms, ambientUniforms, materialUniforms, window.swapchainExtent.width, window.swapchainExtent.height);
+		update_scene_uniforms(camera, lightUniforms, sceneUniforms, materialUniforms, window.swapchainExtent.width, window.swapchainExtent.height);
 
 		// record and submit commands
 		assert(std::size_t(imageIndex) < cbuffers.size());
@@ -532,11 +505,9 @@ int main() try
 			mateiralMesh,
 			sceneUBO.buffer,
 			lighting.buffer,
-			ambientBuffer.buffer,
 			materialBuffer.buffer,
 			sceneUniforms,
 			lightUniforms,
-			ambientUniforms,
 			materialUniforms,
 			pipeLayout.handle,
 			sceneDescriptors,
@@ -584,28 +555,28 @@ namespace
 			glfwSetWindowShouldClose(aWindow, GLFW_TRUE);
 		}
 
-		if (GLFW_KEY_1 == aKey && GLFW_PRESS == aAction)
+		if (GLFW_KEY_N == aKey && GLFW_PRESS == aAction)
 		{
 			cfg::normalDirection = true;
 			cfg::viewDirection = false;
 			cfg::lightDirection = false;
 			cfg::blinnPhong = false;
 		}
-		else if (GLFW_KEY_2 == aKey && GLFW_PRESS == aAction)
+		else if (GLFW_KEY_V == aKey && GLFW_PRESS == aAction)
 		{
 			cfg::viewDirection = true;
 			cfg::normalDirection = false;
 			cfg::lightDirection = false;
 			cfg::blinnPhong = false;
 		}
-		else if (GLFW_KEY_3 == aKey && GLFW_PRESS == aAction)
+		else if (GLFW_KEY_L == aKey && GLFW_PRESS == aAction)
 		{
 			cfg::lightDirection = true;
 			cfg::normalDirection = false;
 			cfg::viewDirection = false;
 			cfg::blinnPhong = false;
 		}
-		else if (GLFW_KEY_4 == aKey && GLFW_PRESS == aAction)
+		else if (GLFW_KEY_B == aKey && GLFW_PRESS == aAction)
 		{
 			cfg::blinnPhong = true;
 			cfg::normalDirection = false;
@@ -684,7 +655,6 @@ namespace
 	void update_scene_uniforms( Camera& camera,
 								glsl::Light& aLight, 
 								glsl::SceneUniform& aSceneUniforms, 
-								glsl::Ambient& aAmbientUniforms,
 								glsl::MaterialUniform& aMaterialUniforms,
 								std::uint32_t aFramebufferWidth, 
 								std::uint32_t aFramebufferHeight)
@@ -708,8 +678,7 @@ namespace
 		aLight.position = glm::vec3(0.f, 9.3f, -3.f);
 		aLight.colour = glm::vec3(1.f, 1.f, 0.8f);
 
-		//Ambient
-		aAmbientUniforms.colour = glm::vec3(1.f, 1.f, 1.f);
+		aMaterialUniforms.emissive = glm::vec4(1.f, 1.f, 1.f, 1.f);
 	}
 }
 
@@ -1256,7 +1225,7 @@ namespace
 		vertexInputs[0].binding = 0;
 		vertexInputs[0].stride = sizeof(float) * 3;
 		vertexInputs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
+		//normal
 		vertexInputs[1].binding = 1;
 		vertexInputs[1].stride = sizeof(float) * 3;
 		vertexInputs[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
@@ -1266,7 +1235,7 @@ namespace
 		vertexAttributes[0].location = 0;
 		vertexAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
 		vertexAttributes[0].offset = 0;
-
+		//normal
 		vertexAttributes[1].binding = 1;
 		vertexAttributes[1].location = 1;
 		vertexAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -1477,12 +1446,10 @@ namespace
 		ColourMesh& aColourMesh,
 		VkBuffer aSceneUBO,
 		VkBuffer aLight,
-		VkBuffer aAmbient,
 		VkBuffer aMaterial,
 		glsl::SceneUniform const& aSceneUniform,
 		glsl::Light const& aLightUniform,
-		glsl::Ambient const& aAmbientUniform,
-		glsl::MaterialUniform const& aMaterialUniform,
+		glsl::MaterialUniform& aMaterialUniform,
 		VkPipelineLayout aGraphicsLayout,
 		VkDescriptorSet aSceneDescriptors,
 		VkDescriptorSet aMaterialDescriptors
@@ -1510,12 +1477,8 @@ namespace
 		vkCmdUpdateBuffer(aCmdBuff, aLight, 0, sizeof(glsl::Light), &aLightUniform);
 		lut::buffer_barrier(aCmdBuff, aLight, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
-		lut::buffer_barrier(aCmdBuff, aAmbient, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-		vkCmdUpdateBuffer(aCmdBuff, aLight, 0, sizeof(glsl::Ambient), &aAmbientUniform);
-		lut::buffer_barrier(aCmdBuff, aAmbient, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-		
 		lut::buffer_barrier(aCmdBuff, aMaterial, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-		vkCmdUpdateBuffer(aCmdBuff, aLight, 0, sizeof(glsl::MaterialUniform), &aMaterialUniform);
+		vkCmdUpdateBuffer(aCmdBuff, aMaterial, 0, sizeof(glsl::MaterialUniform), &aMaterialUniform);
 		lut::buffer_barrier(aCmdBuff, aMaterial, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 		
 		//Render Pass
@@ -1537,22 +1500,28 @@ namespace
 
 		vkCmdBeginRenderPass(aCmdBuff, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		{
-			//drawing with pipeline
-			if (cfg::normalDirection)
-				vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsPipe);
-			if (cfg::viewDirection)
-				vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aViewPipe);
-			if (cfg::lightDirection)
-				vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, alightPipe);
 
-			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 0, 1, &aSceneDescriptors, 0, nullptr);
+			//drawing with pipeline
+		if (cfg::normalDirection)
+		{
+			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsPipe);
+			
 		}
+		else if (cfg::viewDirection)
+		{
+			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aViewPipe);
+		}
+		else if (cfg::lightDirection)
+		{
+			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, alightPipe);
+		}
+
+		vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 0, 1, &aSceneDescriptors, 0, nullptr);
 			//----------------------------------
 		if (cfg::blinnPhong)
 		{
 			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aBlinnPhongPipe);
-			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 0, 1, &aMaterialDescriptors, 0, nullptr);
+			
 		}
 		// Bind vertex input
 		for (int i = 0; i < aColourMesh.positions.size(); i++)
@@ -1562,6 +1531,13 @@ namespace
 			VkBuffer buffers[2] = { pos[i].buffer, norm[i].buffer };
 			VkDeviceSize offsets[2]{};
 			vkCmdBindVertexBuffers(aCmdBuff, 0, 2, buffers, offsets);
+
+			std::cout << glm::to_string(glm::vec4(aColourMesh.emissive[i], 1.0f)) << std::endl;
+			aMaterialUniform.diffuse = glm::vec4(aColourMesh.diffuse[i], 1.0f);
+			aMaterialUniform.emissive = glm::vec4(aColourMesh.emissive[i], 1.0f);
+			aMaterialUniform.specular = glm::vec4(aColourMesh.specular[i], 1.0f);
+			aMaterialUniform.shininess = aColourMesh.shininess[i];
+			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 1, 1, &aMaterialDescriptors, 0, nullptr);
 			vkCmdDraw(aCmdBuff, aColourMesh.vertexCount[i], 1, 0, 0);
 		}
 
