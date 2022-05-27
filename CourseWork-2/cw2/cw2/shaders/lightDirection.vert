@@ -19,6 +19,5 @@ void main()
 	gl_Position = uScene.projCam * vec4(iPosition, 1.f);
 	
 	v2fPos = iPosition;
-
 }
 

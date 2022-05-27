@@ -104,13 +104,6 @@ struct ColourMesh
 	std::vector<lut::Buffer> positions;
 	std::vector<lut::Buffer> normals;
 	std::vector<std::uint32_t> vertexCount;
-
-	//material info
-	std::vector<glm::vec3> emissive;
-	std::vector<glm::vec3> diffuse;
-	std::vector<glm::vec3> specular;
-	std::vector<float> shininess;
-
 };
 
 ModelData load_obj_model( std::string_view const& aOBJPath );

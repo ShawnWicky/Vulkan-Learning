@@ -95,6 +95,9 @@ namespace
 
 		//For question 2.3
 		bool PBR = false;
+
+		//For question 2.4
+		bool moveable = false;
 	}
 
 	// Local types/structures:
@@ -216,14 +219,15 @@ namespace
 
 	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const&, VkDescriptorSetLayout, VkDescriptorSetLayout);
 
-    #pragma region 2.1
+    //2.1
 	lut::Pipeline create_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
 	lut::Pipeline create_view_direction_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
 	lut::Pipeline create_light_direction_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
-	#pragma endregion
-
+	//2.2
 	lut::Pipeline create_blinn_phong_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
-	
+	//2.3
+	lut::Pipeline create_PBR_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
+
 	std::tuple<lut::Image, lut::ImageView> create_depth_buffer(lut::VulkanWindow const&, lut::Allocator const&);
 
 	void create_swapchain_framebuffers(
@@ -241,16 +245,12 @@ namespace
 		std::uint32_t aFramebufferHeight
 	);
 
-	void update_material_uniforms(
-		std::vector<glsl::MaterialUniform>&,
-		ColourMesh&
-	);
-
 
 	void record_commands(
 		VkCommandBuffer,
 		VkRenderPass,
 		VkFramebuffer,
+		VkPipeline,
 		VkPipeline,
 		VkPipeline,
 		VkPipeline,
@@ -262,13 +262,15 @@ namespace
 		VkBuffer aSceneUBO,
 		VkBuffer aLight,
 		std::vector<lut::Buffer>&,
+		std::vector<lut::Buffer>&,
 
 		glsl::SceneUniform const&,
 		glsl::Light const&,
 
 		VkPipelineLayout,
 		VkDescriptorSet aSceneDescriptors,
-		std::vector<VkDescriptorSet> aBlinnPhongDescriptors
+		std::vector<VkDescriptorSet> aBlinnPhongDescriptors,
+		std::vector<VkDescriptorSet> aPBRDescriptors
 		//--------------------------------------
 	);
 
@@ -314,6 +316,7 @@ int main() try
 	//call create_scene_descriptor_layout
 	lut::DescriptorSetLayout sceneLayout = create_scene_descriptor_layout(window);
 	lut::DescriptorSetLayout blinnPhongLayout = create_blinnPhong_descriptor_layout(window);
+	
 	//create pipeline layout
 	lut::PipelineLayout pipeLayout = create_pipeline_layout(window, sceneLayout.handle, blinnPhongLayout.handle);
 	lut::Pipeline pipe = create_pipeline(window, renderPass.handle, pipeLayout.handle);
@@ -321,6 +324,8 @@ int main() try
 	lut::Pipeline lightPipe = create_light_direction_pipeline(window, renderPass.handle, pipeLayout.handle);
 
 	lut::Pipeline blinnPhongPipe = create_blinn_phong_pipeline(window, renderPass.handle, pipeLayout.handle);
+
+	lut::Pipeline pbrPipe = create_PBR_pipeline(window, renderPass.handle, pipeLayout.handle);
 	//create depth buffer
 	auto [depthBuffer, depthBufferView] = create_depth_buffer(window, allocator);
 	std::vector<lut::Framebuffer> framebuffers;
@@ -344,7 +349,7 @@ int main() try
 	/// material buffer
 	/// </summary>
 	/// <returns></returns>
-	ColourMesh materialMesh = createObjBuffer(materialTest, window, allocator);
+	ColourMesh materialMesh = createObjBuffer(newShip, window, allocator);
 
 	//create descriptor pool
 	lut::DescriptorPool dpool = lut::create_descriptor_pool(window);
@@ -399,15 +404,12 @@ int main() try
 	}
 #pragma endregion
 
-#pragma region material buffer and descriptor set
-	//std::vector<glsl::MaterialUniform> vecMaterial;
-	//update_material_uniforms(vecMaterial, materialMesh);
+#pragma region 2.2 material uniform buffer and descriptors
 
-	
-		std::vector<lut::Buffer> materialBuffers(materialTest.materials.size());
-		std::vector<VkDescriptorSet> materialDescritpors(materialTest.materials.size());
-		for (int i = 0; i < materialTest.materials.size(); i++)
-		{
+	std::vector<lut::Buffer> materialBuffers(newShip.materials.size());
+	std::vector<VkDescriptorSet> materialDescriptors(newShip.materials.size());
+	for (int i = 0; i < newShip.materials.size(); i++)
+	{
 			materialBuffers[i] = lut::create_buffer(
 				allocator,
 				sizeof(glsl::MaterialUniform),
@@ -415,7 +417,7 @@ int main() try
 				VMA_MEMORY_USAGE_GPU_ONLY
 			);
 
-			materialDescritpors[i] = lut::alloc_desc_set(window, dpool.handle, blinnPhongLayout.handle);
+			materialDescriptors[i] = lut::alloc_desc_set(window, dpool.handle, blinnPhongLayout.handle);
 			{
 					VkWriteDescriptorSet desc[1]{};
 					VkDescriptorBufferInfo materialInfo{};
@@ -423,7 +425,7 @@ int main() try
 					materialInfo.range = VK_WHOLE_SIZE;
 
 					desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-					desc[0].dstSet = materialDescritpors[i];
+					desc[0].dstSet = materialDescriptors[i];
 					desc[0].dstBinding = 0;
 					desc[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 					desc[0].descriptorCount = 1;
@@ -432,8 +434,45 @@ int main() try
 					constexpr auto numSets = sizeof(desc) / sizeof(desc[0]);
 					vkUpdateDescriptorSets(window.device, numSets, desc, 0, nullptr);
 			}
-		}
+	}
 #pragma endregion
+
+#pragma region 2.3 material uniform buffers and descriptors
+	std::vector<lut::Buffer> pbrBuffers(newShip.materials.size());
+	std::vector<VkDescriptorSet> pbrDescriptors(newShip.materials.size());
+	for (int i = 0; i < newShip.materials.size(); i++)
+	{
+		pbrBuffers[i] = lut::create_buffer(
+			allocator,
+			sizeof(glsl::PBRuniform),
+			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VMA_MEMORY_USAGE_GPU_ONLY
+		);
+
+		pbrDescriptors[i] = lut::alloc_desc_set(window, dpool.handle, blinnPhongLayout.handle);
+		{
+			VkWriteDescriptorSet desc[1]{};
+			VkDescriptorBufferInfo materialInfo{};
+			materialInfo.buffer = pbrBuffers[i].buffer;
+			materialInfo.range = VK_WHOLE_SIZE;
+
+			desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			desc[0].dstSet = pbrDescriptors[i];
+			desc[0].dstBinding = 0;
+			desc[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			desc[0].descriptorCount = 1;
+			desc[0].pBufferInfo = &materialInfo;
+
+			constexpr auto numSets = sizeof(desc) / sizeof(desc[0]);
+			vkUpdateDescriptorSets(window.device, numSets, desc, 0, nullptr);
+		}
+	}
+#pragma endregion
+
+	//initialize Light Uniform
+	glsl::Light lightUniforms{};
+	lightUniforms.position = glm::vec3(0.f, 9.3f, -3.f);
+	lightUniforms.colour = glm::vec3(1.f, 1.f, 0.8f);
 
 
 	bool recreateSwapchain = false;
@@ -510,7 +549,6 @@ int main() try
 		}
 
 		glsl::SceneUniform sceneUniforms{};
-		glsl::Light lightUniforms{};
 		
 		update_scene_uniforms(camera, lightUniforms, sceneUniforms, window.swapchainExtent.width, window.swapchainExtent.height);
 	
@@ -526,19 +564,22 @@ int main() try
 			viewPipe.handle,
 			lightPipe.handle,
 			blinnPhongPipe.handle,
+			pbrPipe.handle,
 			window.swapchainExtent,
 			materialMesh,
 
 			sceneUBO.buffer,
 			lighting.buffer,
 			materialBuffers,
+			pbrBuffers,
 
 			sceneUniforms,
 			lightUniforms,
 
 			pipeLayout.handle,
 			sceneDescriptors,
-			materialDescritpors
+			materialDescriptors,
+			pbrDescriptors
 		);
 
 		submit_commands(
@@ -582,12 +623,18 @@ namespace
 			glfwSetWindowShouldClose(aWindow, GLFW_TRUE);
 		}
 
+		if (GLFW_KEY_SPACE == aKey && GLFW_PRESS == aAction)
+		{
+			cfg::moveable = !cfg::moveable;
+		}
+
 		if (GLFW_KEY_N == aKey && GLFW_PRESS == aAction)
 		{
 			cfg::normalDirection = true;
 			cfg::viewDirection = false;
 			cfg::lightDirection = false;
 			cfg::blinnPhong = false;
+			cfg::PBR = false;
 		}
 		else if (GLFW_KEY_V == aKey && GLFW_PRESS == aAction)
 		{
@@ -595,6 +642,7 @@ namespace
 			cfg::normalDirection = false;
 			cfg::lightDirection = false;
 			cfg::blinnPhong = false;
+			cfg::PBR = false;
 		}
 		else if (GLFW_KEY_L == aKey && GLFW_PRESS == aAction)
 		{
@@ -602,10 +650,20 @@ namespace
 			cfg::normalDirection = false;
 			cfg::viewDirection = false;
 			cfg::blinnPhong = false;
+			cfg::PBR = false;
 		}
 		else if (GLFW_KEY_B == aKey && GLFW_PRESS == aAction)
 		{
 			cfg::blinnPhong = true;
+			cfg::normalDirection = false;
+			cfg::viewDirection = false;
+			cfg::lightDirection = false;
+			cfg::PBR = false;
+		}
+		else if (GLFW_KEY_P == aKey && GLFW_PRESS == aAction)
+		{
+			cfg::PBR = true;
+			cfg::blinnPhong = false;
 			cfg::normalDirection = false;
 			cfg::viewDirection = false;
 			cfg::lightDirection = false;
@@ -645,6 +703,7 @@ namespace
 			camera.speedScalar = 2.f;
 		else if (glfwGetKey(aWindow, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
 			camera.speedScalar = 0.05f;
+
 	}
 
 	void glfw_callback_cursor_pos(GLFWwindow* window, double xPos, double yPos)
@@ -700,26 +759,14 @@ namespace
 		//aSceneUniforms.camPos = aSceneUniforms.projection * aSceneUniforms.view * aSceneUniforms.model;
 		aSceneUniforms.projCam = aSceneUniforms.projection * aSceneUniforms.camera;
 
-		//Light
-		aLight.position = glm::vec3(0.f, 9.3f, -3.f);
-		aLight.colour = glm::vec3(1.f, 1.f, 0.8f);
-	}
-
-	void update_material_uniforms(
-		std::vector<glsl::MaterialUniform>& aMaterialUniforms,
-		ColourMesh& aColourMesh)
-	{
-		
-		for (int i = 0; i < aColourMesh.positions.size(); i++)
+		if (cfg::moveable)
 		{
-			glsl::MaterialUniform temp;
-
-			temp.diffuse = glm::vec4(aColourMesh.diffuse[i], 1.f);
-			temp.emissive = glm::vec4(aColourMesh.emissive[i], 1.f);
-			temp.specular = glm::vec4(aColourMesh.specular[i], 1.f);
-			temp.shininess = aColourMesh.shininess[i];
-
-			aMaterialUniforms.emplace_back(temp);
+			glm::mat4 trans = glm::mat4(1.f);
+			glm::mat4 rotate = glm::rotate(trans, glm::radians(2.f), glm::vec3(0.f, 1.f, 0.f));
+			glm::vec4 temp = glm::vec4(aLight.position, 1.f);
+			temp = rotate * temp;
+			aLight.position = glm::vec3(temp.x, temp.y, temp.z);
+			std::cout << glm::to_string(temp) << std::endl;
 		}
 	}
 }
@@ -1388,6 +1435,155 @@ namespace
 	}
 #pragma endregion 
 
+#pragma region 2.3
+	lut::Pipeline create_PBR_pipeline(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, VkPipelineLayout aPipelineLayout)
+	{
+			//first step  : load shader modules
+			lut::ShaderModule vert = lut::load_shader_module(aWindow, cfg::kPBRVertPath);
+			lut::ShaderModule frag = lut::load_shader_module(aWindow, cfg::kPBRFragPath);
+
+			//Shader stages in the pipeline
+			//We need two here, vert and frag
+			VkPipelineShaderStageCreateInfo  stages[2]{};
+			//vertex  [0]
+			stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+			stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+			stages[0].module = vert.handle;
+			stages[0].pName = "main";
+
+			//fragment [1]
+			stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+			stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+			stages[1].module = frag.handle;
+			stages[1].pName = "main";
+
+			//----------------------------------------------------VkPipelineVertexInputStateCreateInfo
+			VkVertexInputBindingDescription vertexInputs[2]{};
+			//position
+			vertexInputs[0].binding = 0;
+			vertexInputs[0].stride = sizeof(float) * 3;
+			vertexInputs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+			//normal
+			vertexInputs[1].binding = 1;
+			vertexInputs[1].stride = sizeof(float) * 3;
+			vertexInputs[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+			VkVertexInputAttributeDescription vertexAttributes[2]{};
+			//position
+			vertexAttributes[0].binding = 0;
+			vertexAttributes[0].location = 0;
+			vertexAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+			vertexAttributes[0].offset = 0;
+			//normal
+			vertexAttributes[1].binding = 1;
+			vertexAttributes[1].location = 1;
+			vertexAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+			vertexAttributes[1].offset = 0;
+			//----------------------------------------------------VkPipelineVertexInputStateCreateInfo 
+
+			VkPipelineVertexInputStateCreateInfo inputInfo{};
+			inputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+			inputInfo.vertexBindingDescriptionCount = 2;
+			inputInfo.pVertexBindingDescriptions = vertexInputs;
+			inputInfo.vertexAttributeDescriptionCount = 2;
+			inputInfo.pVertexAttributeDescriptions = vertexAttributes;
+
+
+			//for rasterization
+			VkPipelineInputAssemblyStateCreateInfo assemblyInfo{};
+			assemblyInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+			assemblyInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+			assemblyInfo.primitiveRestartEnable = VK_FALSE;
+
+			//todo list...   Tessellation State   not now
+
+			//viewport state
+			VkViewport viewport{};
+			viewport.x = 0.0f;
+			viewport.y = 0.0f;
+			viewport.width = float(aWindow.swapchainExtent.width);
+			viewport.height = float(aWindow.swapchainExtent.height);
+			viewport.minDepth = 0.0f;
+			viewport.maxDepth = 1.0f;
+
+			VkRect2D scissor{};
+			scissor.extent = VkExtent2D{ aWindow.swapchainExtent.width,
+										 aWindow.swapchainExtent.height };
+			scissor.offset = VkOffset2D{ 0,0 };
+
+			VkPipelineViewportStateCreateInfo viewportInfo{};
+			viewportInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+			viewportInfo.viewportCount = 1;
+			viewportInfo.pViewports = &viewport;
+			viewportInfo.scissorCount = 1;
+			viewportInfo.pScissors = &scissor;
+
+			//Rasterization State
+			VkPipelineRasterizationStateCreateInfo rasterInfo{};
+			rasterInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+			rasterInfo.depthClampEnable = VK_FALSE;
+			rasterInfo.rasterizerDiscardEnable = VK_FALSE;
+			rasterInfo.polygonMode = VK_POLYGON_MODE_FILL;
+			rasterInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+			rasterInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;  // like OpenGL
+			rasterInfo.depthBiasEnable = VK_FALSE;
+			rasterInfo.lineWidth = 1.0f;
+
+
+			//Mulitisampling 
+			VkPipelineMultisampleStateCreateInfo sampleInfo{};
+			sampleInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+			sampleInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+			//Depth/Stencil State    not now
+			VkPipelineDepthStencilStateCreateInfo depthInfo{};
+			depthInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+			depthInfo.depthTestEnable = VK_TRUE;
+			depthInfo.depthWriteEnable = VK_TRUE;
+			depthInfo.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+			depthInfo.minDepthBounds = 0.f;
+			depthInfo.maxDepthBounds = 1.f;
+
+			//Color Blend State  
+			//mask 
+			VkPipelineColorBlendAttachmentState blendStates[1]{};
+			blendStates[0].blendEnable = VK_FALSE;
+			blendStates[0].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+			VkPipelineColorBlendStateCreateInfo blendInfo{};
+			blendInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+			blendInfo.attachmentCount = 1;
+			blendInfo.pAttachments = blendStates;
+
+			//Dynamic States  not now
+
+			//Create pipeline
+			VkGraphicsPipelineCreateInfo pipelineInfo{};
+			pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+			pipelineInfo.stageCount = 2;  //vert frag
+			pipelineInfo.pStages = stages;
+			pipelineInfo.pVertexInputState = &inputInfo;
+			pipelineInfo.pInputAssemblyState = &assemblyInfo;
+			pipelineInfo.pViewportState = &viewportInfo;
+			pipelineInfo.pRasterizationState = &rasterInfo;
+			pipelineInfo.pMultisampleState = &sampleInfo;
+			pipelineInfo.pColorBlendState = &blendInfo;
+			pipelineInfo.layout = aPipelineLayout;
+			pipelineInfo.renderPass = aRenderPass;
+			pipelineInfo.subpass = 0;
+			pipelineInfo.pTessellationState = nullptr;
+			pipelineInfo.pDepthStencilState = &depthInfo;
+			pipelineInfo.pDynamicState = nullptr;
+
+			VkPipeline pipe = VK_NULL_HANDLE;
+			if (auto const res = vkCreateGraphicsPipelines(aWindow.device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipe); VK_SUCCESS != res)
+			{
+				throw lut::Error("Unable to create graphics pipeline\n" "vkCreateGraphicsPipelines() returned %s", lut::to_string(res).c_str());
+			}
+
+			return lut::Pipeline(aWindow.device, pipe);
+		
+	}
+#pragma endregion
 
 	void create_swapchain_framebuffers(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, std::vector<lut::Framebuffer>& aFramebuffers, VkImageView aDepthView)
 	{
@@ -1484,19 +1680,21 @@ namespace
 		VkPipeline aViewPipe,
 		VkPipeline alightPipe,
 		VkPipeline aBlinnPhongPipe,
+		VkPipeline aPBRPipe,
 		VkExtent2D const& aImageExtent,
 		ColourMesh& aColourMesh,
 
 		VkBuffer aSceneUBO,
 		VkBuffer aLight,
 		std::vector<lut::Buffer>& aMaterial,
-
+		std::vector<lut::Buffer>& aPBR,
 		glsl::SceneUniform const& aSceneUniform,
 		glsl::Light const& aLightUniform,
 
 		VkPipelineLayout aGraphicsLayout,
 		VkDescriptorSet aSceneDescriptors,
-		std::vector<VkDescriptorSet> aMaterialDescriptors
+		std::vector<VkDescriptorSet> aMaterialDescriptors,
+		std::vector<VkDescriptorSet> aPBRDescriptors
 		///------------------------------------
 	)
 	{
@@ -1525,14 +1723,29 @@ namespace
 			for (int i = 0; i < aMaterial.size(); i++)
 			{
 				glsl::MaterialUniform materialuniforms{};
-				materialuniforms.diffuse = glm::vec4(materialTest.materials[i].diffuse, 1.f);
-				materialuniforms.emissive = glm::vec4(materialTest.materials[i].emissive, 1.f);
-				materialuniforms.specular = glm::vec4(materialTest.materials[i].specular, 1.f);
-				materialuniforms.shininess = materialTest.materials[i].shininess;
+				materialuniforms.diffuse = glm::vec4(newShip.materials[i].diffuse, 1.f);
+				materialuniforms.emissive = glm::vec4(newShip.materials[i].emissive, 1.f);
+				materialuniforms.specular = glm::vec4(newShip.materials[i].specular, 1.f);
+				materialuniforms.shininess = newShip.materials[i].shininess;
 
 				lut::buffer_barrier(aCmdBuff, aMaterial[i].buffer, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 				vkCmdUpdateBuffer(aCmdBuff, aMaterial[i].buffer, 0, sizeof(glsl::MaterialUniform), &materialuniforms);
 				lut::buffer_barrier(aCmdBuff, aMaterial[i].buffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+			}
+		}
+		else if (cfg::PBR)
+		{
+			for (int i = 0; i < aPBR.size(); i++)
+			{
+				glsl::PBRuniform pbrUniforms{};
+				pbrUniforms.albedo = glm::vec4(newShip.materials[i].albedo, 1.f);
+				pbrUniforms.emissive = glm::vec4(newShip.materials[i].emissive, 1.f);
+				pbrUniforms.metalness = newShip.materials[i].metalness;
+				pbrUniforms.shininess = newShip.materials[i].shininess;
+
+				lut::buffer_barrier(aCmdBuff, aPBR[i].buffer, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+				vkCmdUpdateBuffer(aCmdBuff, aPBR[i].buffer, 0, sizeof(glsl::PBRuniform), &pbrUniforms);
+				lut::buffer_barrier(aCmdBuff, aPBR[i].buffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 			}
 		}
 		//Render Pass
@@ -1567,13 +1780,16 @@ namespace
 			//----------------------------------
 		if (cfg::blinnPhong)
 			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aBlinnPhongPipe);
-			
+		else if(cfg::PBR)
+			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aPBRPipe);
 		// Bind vertex input
 		for (int i = 0; i < aColourMesh.positions.size(); i++)
 		{
 			if (cfg::blinnPhong)
-				vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 1, 1, &aMaterialDescriptors[materialTest.meshes[i].materialIndex], 0, nullptr);
-			
+				vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 1, 1, &aMaterialDescriptors[newShip.meshes[i].materialIndex], 0, nullptr);
+			else if(cfg::PBR)
+				vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 1, 1, &aPBRDescriptors[newShip.meshes[i].materialIndex], 0, nullptr);
+
 			auto& pos = aColourMesh.positions;
 			auto& norm = aColourMesh.normals;
 			VkBuffer buffers[2] = { pos[i].buffer, norm[i].buffer };

@@ -42,11 +42,12 @@ void main()
 	float nv = max(dot(normal, viewDir), 0.f);
 	float nl = max(dot(normal, lightDir), 0.f);
 	float vh = dot(normal, halfwayDir);
+
 	//Le
 	vec3 Lemit = uMaterial.emissive.xyz;
 
 	//Lamibent
-	vec3 Lamibent = vec3(0.1f, 0.1f, 0.1f) * uMaterial.albedo.xyz;
+	vec3 Lamibent = vec3(0.02f, 0.02f, 0.02f) * uMaterial.albedo.xyz;
 
 	//Fresnel Term
 	vec3 F0 = (1 - uMaterial.metalness) * vec3(0.04f, 0.04f, 0.04f) + uMaterial.metalness * uMaterial.albedo.xyz;   
@@ -56,16 +57,17 @@ void main()
 	vec3 Ldiffuse = (uMaterial.albedo.xyz/PI) * (vec3(1.f, 1.f, 1.f) - F) * (1 - uMaterial.metalness);
 
 	//normal distribution function
-	float D = ((uMaterial.shininess+2) / 2*PI) * pow(max(dot(normal, halfwayDir), 0.f), uMaterial.shininess);
+	float D = ((uMaterial.shininess+2) / 2*PI) * pow(nh, uMaterial.shininess);
 
 	//masking term
 	float G = min(1, min(2*nh*nv/vh, 2*nh*nl/vh));
 
 	//BRDF
-	BRDF = Ldiffuse + D * F * G / 4 * nv * nl;
+	vec3 BRDF = Ldiffuse + (D * F * G / 4 * nv * nl);
 
 	//specular 
-	Lspec = BRDF * light.colour * nl;
+	vec3 Lspec = BRDF * light.colour * nl;
 
 	outColour = vec4((Lemit + Lamibent + Lspec), 1.f);
+	//outColour = vec4(G*F, 1.f);
 }
