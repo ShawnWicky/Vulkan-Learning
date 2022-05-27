@@ -156,23 +156,23 @@ namespace
 
 	namespace glsl
 	{
+		struct Light
+		{
+			glm::vec4 position;
+			glm::vec4 colour;
+		};
 		struct SceneUniform
 		{
 			glm::mat4 camera;
 			glm::mat4 projection;
 			glm::mat4 projCam;
-			glm::vec3 camPos;
+			Light lights[4];
+alignas(16)	glm::vec3 camPos;
+
 		};
 
 		static_assert(sizeof(SceneUniform) <= 65536, "SceneUniform must be less than 65536 bytes for vkCmdUpdateBuffer");
 		static_assert(sizeof(SceneUniform) % 4 == 0, "SceneUniform size must be a multiple of 4 bytes");
-
-
-		struct Light
-		{
-			alignas(16) glm::vec3 position;
-			alignas(16) glm::vec3 colour;
-		};
 
 		struct MaterialUniform
 		{
@@ -239,7 +239,6 @@ namespace
 
 	void update_scene_uniforms(
 		Camera& camera,
-		glsl::Light&,
 		glsl::SceneUniform&,
 		std::uint32_t aFramebufferWidth,
 		std::uint32_t aFramebufferHeight
@@ -260,12 +259,10 @@ namespace
 		ColourMesh&,
 
 		VkBuffer aSceneUBO,
-		VkBuffer aLight,
 		std::vector<lut::Buffer>&,
 		std::vector<lut::Buffer>&,
 
 		glsl::SceneUniform const&,
-		glsl::Light const&,
 
 		VkPipelineLayout,
 		VkDescriptorSet aSceneDescriptors,
@@ -362,26 +359,13 @@ int main() try
 		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 		VMA_MEMORY_USAGE_GPU_ONLY
 	);
-	//
-	lut::Buffer lighting = lut::create_buffer(
-		allocator,
-		sizeof(glsl::Light),
-		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-		VMA_MEMORY_USAGE_GPU_ONLY
-	);
-
 	// allocate descriptor set for uniform buffer
 	VkDescriptorSet sceneDescriptors = lut::alloc_desc_set(window, dpool.handle, sceneLayout.handle);
 	{
-		VkWriteDescriptorSet desc[2]{};
+		VkWriteDescriptorSet desc[1]{};
 		VkDescriptorBufferInfo sceneUboInfo{};
 		sceneUboInfo.buffer = sceneUBO.buffer;
 		sceneUboInfo.range = VK_WHOLE_SIZE;
-
-		VkDescriptorBufferInfo lightInfo{};
-		lightInfo.buffer = lighting.buffer;
-		lightInfo.range = VK_WHOLE_SIZE;
-
 
 		desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		desc[0].dstSet = sceneDescriptors;
@@ -389,14 +373,6 @@ int main() try
 		desc[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		desc[0].descriptorCount = 1;
 		desc[0].pBufferInfo = &sceneUboInfo;
-
-
-		desc[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		desc[1].dstSet = sceneDescriptors;
-		desc[1].dstBinding = 1;
-		desc[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		desc[1].descriptorCount = 1;
-		desc[1].pBufferInfo = &lightInfo;
 
 		//initialize descriptor set with vkUpdateDescriptorSets
 		constexpr auto numSets = sizeof(desc) / sizeof(desc[0]);
@@ -470,10 +446,18 @@ int main() try
 #pragma endregion
 
 	//initialize Light Uniform
-	glsl::Light lightUniforms{};
-	lightUniforms.position = glm::vec3(0.f, 9.3f, -3.f);
-	lightUniforms.colour = glm::vec3(1.f, 1.f, 0.8f);
+	glsl::SceneUniform sceneUniforms{};
+	sceneUniforms.lights[0].position = glm::vec4(0.f, 9.3f, -3.f, 1.f);
+	sceneUniforms.lights[0].colour = glm::vec4(1.f, 1.f, 0.8f, 1.f);
 
+	sceneUniforms.lights[1].position = glm::vec4(3.f, 9.3f, -3.f, 1.f);
+	sceneUniforms.lights[1].colour = glm::vec4(1.f, 0.f, 0.0f, 1.f);
+
+	sceneUniforms.lights[2].position = glm::vec4(-3.f, 9.3f, -3.f, 1.f);
+	sceneUniforms.lights[2].colour = glm::vec4(0.f, 1.f, 0.0f, 1.f);
+
+	sceneUniforms.lights[3].position = glm::vec4(0.f, 9.3f, +3.f, 1.f);
+	sceneUniforms.lights[3].colour = glm::vec4(0.f, 0.f, 1.0f, 1.f);
 
 	bool recreateSwapchain = false;
 
@@ -547,10 +531,8 @@ int main() try
 		{
 			throw lut::Error("Unable to reset command buffer fence %u\n" "vkResetFences() returned %s", imageIndex, lut::to_string(res).c_str());
 		}
-
-		glsl::SceneUniform sceneUniforms{};
 		
-		update_scene_uniforms(camera, lightUniforms, sceneUniforms, window.swapchainExtent.width, window.swapchainExtent.height);
+		update_scene_uniforms(camera, sceneUniforms, window.swapchainExtent.width, window.swapchainExtent.height);
 	
 		// record and submit commands
 		assert(std::size_t(imageIndex) < cbuffers.size());
@@ -569,12 +551,10 @@ int main() try
 			materialMesh,
 
 			sceneUBO.buffer,
-			lighting.buffer,
 			materialBuffers,
 			pbrBuffers,
 
 			sceneUniforms,
-			lightUniforms,
 
 			pipeLayout.handle,
 			sceneDescriptors,
@@ -739,7 +719,6 @@ namespace
 	}
 
 	void update_scene_uniforms( Camera& camera,
-								glsl::Light& aLight, 
 								glsl::SceneUniform& aSceneUniforms, 
 								std::uint32_t aFramebufferWidth, 
 								std::uint32_t aFramebufferHeight)
@@ -763,10 +742,8 @@ namespace
 		{
 			glm::mat4 trans = glm::mat4(1.f);
 			glm::mat4 rotate = glm::rotate(trans, glm::radians(2.f), glm::vec3(0.f, 1.f, 0.f));
-			glm::vec4 temp = glm::vec4(aLight.position, 1.f);
-			temp = rotate * temp;
-			aLight.position = glm::vec3(temp.x, temp.y, temp.z);
-			std::cout << glm::to_string(temp) << std::endl;
+			for (int i = 0; i < 4; i++)
+				aSceneUniforms.lights[i].position = rotate * aSceneUniforms.lights[i].position;
 		}
 	}
 }
@@ -776,7 +753,6 @@ namespace
 {
 	lut::RenderPass create_render_pass(lut::VulkanWindow const& aWindow)
 	{
-		//throw lut::Error( "Not yet implemented" ); //TODO- (Section 1 / Exercise 3) implement me!
 		//Render Pass attachments
 		VkAttachmentDescription attachments[2]{};
 		attachments[0].format = aWindow.swapchainFormat;
@@ -1685,11 +1661,9 @@ namespace
 		ColourMesh& aColourMesh,
 
 		VkBuffer aSceneUBO,
-		VkBuffer aLight,
 		std::vector<lut::Buffer>& aMaterial,
 		std::vector<lut::Buffer>& aPBR,
 		glsl::SceneUniform const& aSceneUniform,
-		glsl::Light const& aLightUniform,
 
 		VkPipelineLayout aGraphicsLayout,
 		VkDescriptorSet aSceneDescriptors,
@@ -1713,10 +1687,6 @@ namespace
 		lut::buffer_barrier(aCmdBuff, aSceneUBO, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 		vkCmdUpdateBuffer(aCmdBuff, aSceneUBO, 0, sizeof(glsl::SceneUniform), &aSceneUniform);
 		lut::buffer_barrier(aCmdBuff, aSceneUBO, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT);
-
-		lut::buffer_barrier(aCmdBuff, aLight, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-		vkCmdUpdateBuffer(aCmdBuff, aLight, 0, sizeof(glsl::Light), &aLightUniform);
-		lut::buffer_barrier(aCmdBuff, aLight, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
 		if (cfg::blinnPhong)
 		{
