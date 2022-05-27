@@ -98,6 +98,9 @@ namespace
 
 		//For question 2.4
 		bool moveable = false;
+
+		//For question 2.5	
+		int constant = 1;
 	}
 
 	// Local types/structures:
@@ -161,6 +164,7 @@ namespace
 			glm::vec4 position;
 			glm::vec4 colour;
 		};
+
 		struct SceneUniform
 		{
 			glm::mat4 camera;
@@ -168,7 +172,6 @@ namespace
 			glm::mat4 projCam;
 			Light lights[4];
 alignas(16)	glm::vec3 camPos;
-
 		};
 
 		static_assert(sizeof(SceneUniform) <= 65536, "SceneUniform must be less than 65536 bytes for vkCmdUpdateBuffer");
@@ -289,6 +292,8 @@ alignas(16)	glm::vec3 camPos;
 
 int main() try
 {
+	glsl::SceneUniform sceneUniforms{};
+	
 	// Create Vulkan Window
 	auto window = lut::make_vulkan_window();
 
@@ -446,7 +451,7 @@ int main() try
 #pragma endregion
 
 	//initialize Light Uniform
-	glsl::SceneUniform sceneUniforms{};
+	
 	sceneUniforms.lights[0].position = glm::vec4(0.f, 9.3f, -3.f, 1.f);
 	sceneUniforms.lights[0].colour = glm::vec4(1.f, 1.f, 0.8f, 1.f);
 
@@ -603,50 +608,71 @@ namespace
 			glfwSetWindowShouldClose(aWindow, GLFW_TRUE);
 		}
 
+		//For user control different light numbers
+		if(GLFW_KEY_1 == aKey && GLFW_PRESS == aAction)
+		{
+			
+		}
+		else if(GLFW_KEY_2 == aKey && GLFW_PRESS == aAction)
+		{
+
+		}
+		else if(GLFW_KEY_3 == aKey && GLFW_PRESS == aAction)
+		{
+
+		}
+		else if(GLFW_KEY_4 == aKey && GLFW_PRESS == aAction)
+		{
+
+		}
+		//For moveable light
 		if (GLFW_KEY_SPACE == aKey && GLFW_PRESS == aAction)
 		{
 			cfg::moveable = !cfg::moveable;
 		}
 
-		if (GLFW_KEY_N == aKey && GLFW_PRESS == aAction)
+		//be able to change the state from different questions
 		{
-			cfg::normalDirection = true;
-			cfg::viewDirection = false;
-			cfg::lightDirection = false;
-			cfg::blinnPhong = false;
-			cfg::PBR = false;
-		}
-		else if (GLFW_KEY_V == aKey && GLFW_PRESS == aAction)
-		{
-			cfg::viewDirection = true;
-			cfg::normalDirection = false;
-			cfg::lightDirection = false;
-			cfg::blinnPhong = false;
-			cfg::PBR = false;
-		}
-		else if (GLFW_KEY_L == aKey && GLFW_PRESS == aAction)
-		{
-			cfg::lightDirection = true;
-			cfg::normalDirection = false;
-			cfg::viewDirection = false;
-			cfg::blinnPhong = false;
-			cfg::PBR = false;
-		}
-		else if (GLFW_KEY_B == aKey && GLFW_PRESS == aAction)
-		{
-			cfg::blinnPhong = true;
-			cfg::normalDirection = false;
-			cfg::viewDirection = false;
-			cfg::lightDirection = false;
-			cfg::PBR = false;
-		}
-		else if (GLFW_KEY_P == aKey && GLFW_PRESS == aAction)
-		{
-			cfg::PBR = true;
-			cfg::blinnPhong = false;
-			cfg::normalDirection = false;
-			cfg::viewDirection = false;
-			cfg::lightDirection = false;
+			if (GLFW_KEY_N == aKey && GLFW_PRESS == aAction)
+			{
+				cfg::normalDirection = true;
+				cfg::viewDirection = false;
+				cfg::lightDirection = false;
+				cfg::blinnPhong = false;
+				cfg::PBR = false;
+			}
+			else if (GLFW_KEY_V == aKey && GLFW_PRESS == aAction)
+			{
+				cfg::viewDirection = true;
+				cfg::normalDirection = false;
+				cfg::lightDirection = false;
+				cfg::blinnPhong = false;
+				cfg::PBR = false;
+			}
+			else if (GLFW_KEY_L == aKey && GLFW_PRESS == aAction)
+			{
+				cfg::lightDirection = true;
+				cfg::normalDirection = false;
+				cfg::viewDirection = false;
+				cfg::blinnPhong = false;
+				cfg::PBR = false;
+			}
+			else if (GLFW_KEY_B == aKey && GLFW_PRESS == aAction)
+			{
+				cfg::blinnPhong = true;
+				cfg::normalDirection = false;
+				cfg::viewDirection = false;
+				cfg::lightDirection = false;
+				cfg::PBR = false;
+			}
+			else if (GLFW_KEY_P == aKey && GLFW_PRESS == aAction)
+			{
+				cfg::PBR = true;
+				cfg::blinnPhong = false;
+				cfg::normalDirection = false;
+				cfg::viewDirection = false;
+				cfg::lightDirection = false;
+			}
 		}
 		// forward/backward
 		if (glfwGetKey(aWindow, GLFW_KEY_W) == GLFW_PRESS)
@@ -683,8 +709,7 @@ namespace
 			camera.speedScalar = 2.f;
 		else if (glfwGetKey(aWindow, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
 			camera.speedScalar = 0.05f;
-
-	}
+}
 
 	void glfw_callback_cursor_pos(GLFWwindow* window, double xPos, double yPos)
 	{
