@@ -84,7 +84,7 @@ namespace
 		float lastX;
 		float lastY;
 		float last = 0.f;
-
+		float delta;
 		//For question 2.1
 		bool normalDirection = true;
 		bool viewDirection = false;
@@ -197,7 +197,7 @@ alignas(16)	glm::vec3 camPos;
 
 	void glfw_callback_mouse_button(GLFWwindow* window, int, int, int);
 
-	float getDeltaTime();
+	//float getDeltaTime();
 	// Helpers:
 	lut::RenderPass create_render_pass(lut::VulkanWindow const&);
 
@@ -477,8 +477,16 @@ int main() try
 
 			if (changes.changedSize)
 			{
-
-				pipe = create_pipeline(window, renderPass.handle, pipeLayout.handle);
+				if(cfg::normalDirection)
+					lut::Pipeline pipe = create_pipeline(window, renderPass.handle, pipeLayout.handle);
+				else if(cfg::normalDirection)
+					lut::Pipeline viewPipe = create_view_direction_pipeline(window, renderPass.handle, pipeLayout.handle);
+				else if(cfg::lightDirection)
+					lut::Pipeline lightPipe = create_light_direction_pipeline(window, renderPass.handle, pipeLayout.handle);
+				else if(cfg::blinnPhong)
+					lut::Pipeline blinnPhongPipe = create_blinn_phong_pipeline(window, renderPass.handle, pipeLayout.handle);
+				else if(cfg::PBR)
+					lut::Pipeline pbrPipe = create_PBR_pipeline(window, renderPass.handle, pipeLayout.handle);
 			}
 			//TODO: (Section 6) re-create depth buffer image
 			if (changes.changedSize)
@@ -735,14 +743,9 @@ namespace
 		}
 	}
 
-	float getDeltaTime()
-	{
-		float now = glfwGetTime();
-		float delta = now - cfg::last;
-		cfg::last = now;
 
-		return delta;
-	}
+
+	
 
 	void update_scene_uniforms( Camera& camera,
 								glsl::SceneUniform& aSceneUniforms, 
@@ -750,7 +753,9 @@ namespace
 								std::uint32_t aFramebufferHeight)
 	{
 		//delta time
-
+		float now = glfwGetTime();
+		cfg::delta = now - cfg::last;
+		cfg::last = now;
 		//initilize SceneUniform members
 		float const aspect = aFramebufferWidth / float(aFramebufferHeight);
 
@@ -769,7 +774,7 @@ namespace
 		if (cfg::moveable)
 		{
 			glm::mat4 trans = glm::mat4(1.f);
-			glm::mat4 rotate = glm::rotate(trans, glm::radians(20.f * getDeltaTime()), glm::vec3(0.f, 1.f, 0.f));
+			glm::mat4 rotate = glm::rotate(trans, glm::radians(20.f * cfg::delta), glm::vec3(0.f, 1.f, 0.f));
 			for (int i = 0; i < 4; i++)
 				aSceneUniforms.lights[i].position = rotate * aSceneUniforms.lights[i].position;
 		}
@@ -1890,13 +1895,13 @@ namespace
 
 	void Camera::updateCameraPosition()
 	{
-		position += (forward * speedZ * speedScalar + right * speedX * speedScalar + up * speedY * speedScalar) * getDeltaTime() * 10.f;
+		position += (forward * speedZ * speedScalar + right * speedX * speedScalar + up * speedY * speedScalar) * cfg::delta * 10.f;
 	}
 
 	void Camera::processMouseMovement(float xoffset, float yoffset)
 	{
-		yaw -= xoffset * getDeltaTime() * 5.f;
-		pitch -= yoffset * getDeltaTime() * 5.f;
+		yaw -= xoffset *  cfg::delta;
+		pitch -= yoffset * cfg::delta;
 
 		// update Front, Right and Up Vectors using the updated Euler angles
 		updateCameraAngle();

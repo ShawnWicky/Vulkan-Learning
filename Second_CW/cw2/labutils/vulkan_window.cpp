@@ -189,7 +189,7 @@ namespace labutils
 
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-		ret.window = glfwCreateWindow(1280, 720, "CourseWork 1", nullptr, nullptr);
+		ret.window = glfwCreateWindow(1280, 720, "CourseWork 2", nullptr, nullptr);
 		if (!ret.window)
 		{
 			char const* errMsg = nullptr;
