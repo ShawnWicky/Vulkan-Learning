@@ -81,9 +81,8 @@ namespace
 		//For Camera
 		bool firstMouse = true;
 		bool enableMouse = false;
-
-		const int WIDTH = 1280;
-		const int HEIGHT = 720;
+		float lastX;
+		float lastY;
 
 		//For question 2.1
 		bool normalDirection = true;
@@ -123,7 +122,7 @@ namespace
 		float speedX;
 		float speedY;
 		float speedZ;
-		float speedScalar = 1.f;
+		float speedScalar = 0.5f;
 
 		glm::mat4 getViewMatrix();
 
@@ -596,6 +595,10 @@ namespace
 		auto* uniforms = reinterpret_cast<glsl::SceneUniform*>(glfwGetWindowUserPointer(aWindow));
 
 		//For user control different light numbers
+		if (GLFW_KEY_0 == aKey && GLFW_PRESS == aAction)
+		{
+			uniforms->constant = 0;
+		}
 		if(GLFW_KEY_1 == aKey && GLFW_PRESS == aAction)
 		{
 			uniforms->constant = 1;
@@ -701,23 +704,22 @@ namespace
 
 	void glfw_callback_cursor_pos(GLFWwindow* window, double xPos, double yPos)
 	{
-		float lastX = cfg::WIDTH / 2.f;
-		float lastY = cfg::HEIGHT / 2.f;
+		
 		if (cfg::enableMouse == true)
 		{
 			if (cfg::firstMouse)
 			{
-				lastX = xPos;
-				lastY = yPos;
+				cfg::lastX = xPos;
+				cfg::lastY = yPos;
 				cfg::firstMouse = false;
 			}
 
 			float deltaX, deltaY;
-			deltaX = xPos - lastX;
-			deltaY = lastY - yPos;
+			deltaX = xPos - cfg::lastX;
+			deltaY = cfg::lastY - yPos;
 
-			lastX = xPos;
-			lastY = yPos;
+			cfg::lastX = xPos;
+			cfg::lastY = yPos;
 
 			camera.processMouseMovement(deltaX, deltaY);
 		}
@@ -1851,7 +1853,11 @@ namespace
 		worldUp = iWorldUp;
 		pitch = iPitch;
 		yaw = iYaw;
-		updateCameraAngle();
+		forward.x = glm::cos(pitch) * glm::sin(yaw);
+		forward.y = glm::sin(pitch);
+		forward.z = glm::cos(pitch) * glm::cos(yaw);
+		right = glm::normalize(glm::cross(forward, worldUp));
+		up = glm::normalize(glm::cross(right, forward));
 	}
 
 	glm::mat4 Camera::getViewMatrix()
@@ -1862,13 +1868,10 @@ namespace
 	void Camera::updateCameraAngle()
 	{
 		// calculate the new Front vector
-		glm::vec3 front;
-		front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-		front.y = sin(glm::radians(pitch));
-		front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-		forward = glm::normalize(front);
-		// also re-calculate the Right and Up vector
-		right = glm::normalize(glm::cross(forward, worldUp));  // normalize the vectors, because their length gets closer to 0 the more you look up or down which results in slower movement.
+		forward.x = glm::cos(pitch) * glm::sin(yaw);
+		forward.y = glm::sin(pitch);
+		forward.z = glm::cos(pitch) * glm::cos(yaw);
+		right = glm::normalize(glm::cross(forward, worldUp));
 		up = glm::normalize(glm::cross(right, forward));
 	}
 
@@ -1879,18 +1882,8 @@ namespace
 
 	void Camera::processMouseMovement(float xoffset, float yoffset)
 	{
-		xoffset *= 0.05f;
-		yoffset *= 0.05f;
-
-		yaw += xoffset;
-		pitch += yoffset;
-
-		// make sure that when pitch is out of bounds, screen doesn't get flipped
-		if (pitch > 89.0f)
-			pitch = 89.0f;
-		if (pitch < -89.0f)
-			pitch = -89.0f;
-
+		yaw -= xoffset * 0.01f;
+		pitch -= yoffset * 0.01f;
 
 		// update Front, Right and Up Vectors using the updated Euler angles
 		updateCameraAngle();
