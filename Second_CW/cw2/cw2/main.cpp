@@ -83,6 +83,7 @@ namespace
 		bool enableMouse = false;
 		float lastX;
 		float lastY;
+		float last = 0.f;
 
 		//For question 2.1
 		bool normalDirection = true;
@@ -196,6 +197,7 @@ alignas(16)	glm::vec3 camPos;
 
 	void glfw_callback_mouse_button(GLFWwindow* window, int, int, int);
 
+	float getDeltaTime();
 	// Helpers:
 	lut::RenderPass create_render_pass(lut::VulkanWindow const&);
 
@@ -733,11 +735,22 @@ namespace
 		}
 	}
 
+	float getDeltaTime()
+	{
+		float now = glfwGetTime();
+		float delta = now - cfg::last;
+		cfg::last = now;
+
+		return delta;
+	}
+
 	void update_scene_uniforms( Camera& camera,
 								glsl::SceneUniform& aSceneUniforms, 
 								std::uint32_t aFramebufferWidth, 
 								std::uint32_t aFramebufferHeight)
 	{
+		//delta time
+
 		//initilize SceneUniform members
 		float const aspect = aFramebufferWidth / float(aFramebufferHeight);
 
@@ -756,7 +769,7 @@ namespace
 		if (cfg::moveable)
 		{
 			glm::mat4 trans = glm::mat4(1.f);
-			glm::mat4 rotate = glm::rotate(trans, glm::radians(2.f), glm::vec3(0.f, 1.f, 0.f));
+			glm::mat4 rotate = glm::rotate(trans, glm::radians(20.f * getDeltaTime()), glm::vec3(0.f, 1.f, 0.f));
 			for (int i = 0; i < 4; i++)
 				aSceneUniforms.lights[i].position = rotate * aSceneUniforms.lights[i].position;
 		}
@@ -1877,13 +1890,13 @@ namespace
 
 	void Camera::updateCameraPosition()
 	{
-		position += forward * speedZ * speedScalar + right * speedX * speedScalar + up * speedY * speedScalar;
+		position += (forward * speedZ * speedScalar + right * speedX * speedScalar + up * speedY * speedScalar) * getDeltaTime() * 10.f;
 	}
 
 	void Camera::processMouseMovement(float xoffset, float yoffset)
 	{
-		yaw -= xoffset * 0.01f;
-		pitch -= yoffset * 0.01f;
+		yaw -= xoffset * getDeltaTime() * 5.f;
+		pitch -= yoffset * getDeltaTime() * 5.f;
 
 		// update Front, Right and Up Vectors using the updated Euler angles
 		updateCameraAngle();
