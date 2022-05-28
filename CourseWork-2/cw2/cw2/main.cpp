@@ -98,26 +98,8 @@ namespace
 
 		//For question 2.4
 		bool moveable = false;
-
-		//For question 2.5	
-		int constant = 1;
 	}
 
-	// Local types/structures:
-	// For Blinn Phong (see BlinnPhong.frag):
-	/*
-	namespace glsl
-	{
-		
-	}
-	*/
-	// For PBR (see PBR.frag):
-	/*
-	namespace glsl
-	{
-	
-	}
-	*/
 	///--------------------------------------------------
 	/// Camera Class
 	///-------------------------------------------------
@@ -172,6 +154,7 @@ namespace
 			glm::mat4 projCam;
 			Light lights[4];
 alignas(16)	glm::vec3 camPos;
+			int constant;
 		};
 
 		static_assert(sizeof(SceneUniform) <= 65536, "SceneUniform must be less than 65536 bytes for vkCmdUpdateBuffer");
@@ -292,12 +275,27 @@ alignas(16)	glm::vec3 camPos;
 
 int main() try
 {
+	/// <summary>
+	/// initialize the light array
+	/// </summary>
 	glsl::SceneUniform sceneUniforms{};
 	
+	sceneUniforms.lights[0].position = glm::vec4(0.f, 9.3f, -3.f, 1.f);
+	sceneUniforms.lights[0].colour = glm::vec4(1.f, 1.f, 0.8f, 1.f);
+
+	sceneUniforms.lights[1].position = glm::vec4(3.f, 9.3f, -3.f, 1.f);
+	sceneUniforms.lights[1].colour = glm::vec4(1.f, 0.f, 0.0f, 1.f);
+
+	sceneUniforms.lights[2].position = glm::vec4(-3.f, 9.3f, -3.f, 1.f);
+	sceneUniforms.lights[2].colour = glm::vec4(0.f, 1.f, 0.0f, 1.f);
+
+	sceneUniforms.lights[3].position = glm::vec4(0.f, 9.3f, +3.f, 1.f);
+	sceneUniforms.lights[3].colour = glm::vec4(0.f, 0.f, 1.0f, 1.f);
+
 	// Create Vulkan Window
 	auto window = lut::make_vulkan_window();
 
-	glfwSetWindowUserPointer(window.window, nullptr);
+	glfwSetWindowUserPointer(window.window, &sceneUniforms);
 	//Set the input Mode
 	glfwSetInputMode(window.window, GLFW_CURSOR, NULL);
 
@@ -450,19 +448,6 @@ int main() try
 	}
 #pragma endregion
 
-	//initialize Light Uniform
-	
-	sceneUniforms.lights[0].position = glm::vec4(0.f, 9.3f, -3.f, 1.f);
-	sceneUniforms.lights[0].colour = glm::vec4(1.f, 1.f, 0.8f, 1.f);
-
-	sceneUniforms.lights[1].position = glm::vec4(3.f, 9.3f, -3.f, 1.f);
-	sceneUniforms.lights[1].colour = glm::vec4(1.f, 0.f, 0.0f, 1.f);
-
-	sceneUniforms.lights[2].position = glm::vec4(-3.f, 9.3f, -3.f, 1.f);
-	sceneUniforms.lights[2].colour = glm::vec4(0.f, 1.f, 0.0f, 1.f);
-
-	sceneUniforms.lights[3].position = glm::vec4(0.f, 9.3f, +3.f, 1.f);
-	sceneUniforms.lights[3].colour = glm::vec4(0.f, 0.f, 1.0f, 1.f);
 
 	bool recreateSwapchain = false;
 
@@ -608,23 +593,26 @@ namespace
 			glfwSetWindowShouldClose(aWindow, GLFW_TRUE);
 		}
 
+		auto* uniforms = reinterpret_cast<glsl::SceneUniform*>(glfwGetWindowUserPointer(aWindow));
+
 		//For user control different light numbers
 		if(GLFW_KEY_1 == aKey && GLFW_PRESS == aAction)
 		{
-			
+			uniforms->constant = 1;
 		}
 		else if(GLFW_KEY_2 == aKey && GLFW_PRESS == aAction)
 		{
-
+			uniforms->constant = 2;
 		}
 		else if(GLFW_KEY_3 == aKey && GLFW_PRESS == aAction)
 		{
-
+			uniforms->constant = 3;
 		}
 		else if(GLFW_KEY_4 == aKey && GLFW_PRESS == aAction)
 		{
-
+			uniforms->constant = 4;
 		}
+
 		//For moveable light
 		if (GLFW_KEY_SPACE == aKey && GLFW_PRESS == aAction)
 		{

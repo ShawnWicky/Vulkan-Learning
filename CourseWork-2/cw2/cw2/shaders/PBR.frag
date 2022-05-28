@@ -23,6 +23,7 @@ layout(set = 0, binding = 0) uniform UScene
 			mat4 projCam;
 			Light light[4];
 			vec3 camPos;
+			int constant;
 
 } uScene;
 
@@ -52,7 +53,7 @@ void main()
 
 	vec4 fragColour = vec4((Lemit + Lamibent),1.f);
 
-	for(int i = 0; i < 4; i++)
+	for(int i = 0; i < uScene.constant; i++)
 	{
 		vec3 lightDir = normalize(uScene.light[i].position.xyz - v2fPos);
 		vec3 halfwayDir = normalize(lightDir + viewDir);

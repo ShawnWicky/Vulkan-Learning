@@ -10,15 +10,21 @@ layout( set = 1, binding = 0) uniform UMaterial
 	float shininess; // Last to make std140 alignment easier.
 } uMaterial;
 
+
+struct Light
+{
+	vec4 position;
+	vec4 colour;
+};
 // Light and Uniform Buffer
 layout(set = 0, binding = 0) uniform UScene
 {
 			mat4 camera;
 			mat4 projection;
 			mat4 projCam;
-			vec3 position;
-			vec3 colour;
+			Light light[4];
 			vec3 camPos;
+			int constant;
 } uScene;
 
 // In and Out
@@ -41,18 +47,30 @@ void main()
 	vec3 diffuse = uMaterial.diffuse.xyz;
 	vec3 Camibent = diffuse * ambient;
 
-	//diffuse
+	//normal
 	vec3 normal = normalize(v2fNormal);
-	vec3 lightDir = normalize(uScene.position - v2fPos);
+	//PI
 	const float PI = 3.1415926f;
-	vec3 Cdiff = max(0.f, dot(normal, lightDir)) * diffuse * uScene.colour / PI;
-
-	//specular
+	
+	//viewDir and shiniessFactor
 	vec3 viewDir = normalize(uScene.camPos - v2fPos);
 	float shinessFactor = (uMaterial.shininess + 2.f) / 8.f;
-	vec3 halfwayDir = normalize(lightDir + viewDir);
-	float Pspec = shinessFactor * (pow(max(dot(normal, halfwayDir), 0.f),uMaterial.shininess));
-	vec3 Cspec = Pspec * max(0.f,dot(normal, lightDir)) * uMaterial.specular.xyz * uScene.colour;
 
-	outColour = vec4((Cemit + Camibent + Cdiff + Cspec),1.f);
+	vec4 fragColour = vec4((Cemit+Camibent),1.f);
+	for(int i = 0; i < uScene.constant; i++)
+	{
+		//light direction
+		vec3 lightDir = normalize(uScene.light[i].position.xyz - v2fPos);
+		//diffuse
+		vec3 Cdiff = max(0.f, dot(normal, lightDir)) * diffuse * uScene.light[i].colour.xyz / PI;
+		//half way direction
+		vec3 halfwayDir = normalize(lightDir + viewDir);
+		float Pspec = shinessFactor * (pow(max(dot(normal, halfwayDir), 0.f),uMaterial.shininess));
+		//specular
+		vec3 Cspec = Pspec * max(0.f,dot(normal, lightDir)) * uMaterial.specular.xyz * uScene.light[i].colour.xyz;
+
+		fragColour += vec4((Cspec + Cdiff),1.f);
+	}
+
+	outColour = fragColour;
 }
