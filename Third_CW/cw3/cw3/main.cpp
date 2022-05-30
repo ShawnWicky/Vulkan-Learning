@@ -363,6 +363,8 @@ int main() try
 #pragma endregion
 
 
+	lut::Sampler defaultSampler = lut::create_default_sampler(window);
+
 	bool recreateSwapchain = false;
 
 	while (!glfwWindowShouldClose(window.window))
