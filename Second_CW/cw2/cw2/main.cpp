@@ -85,6 +85,7 @@ namespace
 		float lastY;
 		float last = 0.f;
 		float delta;
+
 		//For question 2.1
 		bool normalDirection = true;
 		bool viewDirection = false;
@@ -196,12 +197,11 @@ namespace
 
 	void glfw_callback_mouse_button(GLFWwindow* window, int, int, int);
 
-	//float getDeltaTime();
 	// Helpers:
 	lut::RenderPass create_render_pass(lut::VulkanWindow const&);
 
 	lut::DescriptorSetLayout create_scene_descriptor_layout(lut::VulkanWindow const&);
-	lut::DescriptorSetLayout create_blinnPhong_descriptor_layout(lut::VulkanWindow const&);
+	lut::DescriptorSetLayout create_advanced_descriptor_layout(lut::VulkanWindow const&);
 
 	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const&, VkDescriptorSetLayout, VkDescriptorSetLayout);
 
@@ -315,10 +315,10 @@ int main() try
 	//create scene descriptor set layout
 	//call create_scene_descriptor_layout
 	lut::DescriptorSetLayout sceneLayout = create_scene_descriptor_layout(window);
-	lut::DescriptorSetLayout blinnPhongLayout = create_blinnPhong_descriptor_layout(window);
+	lut::DescriptorSetLayout advancedLayout = create_advanced_descriptor_layout(window);
 	
 	//create pipeline layout
-	lut::PipelineLayout pipeLayout = create_pipeline_layout(window, sceneLayout.handle, blinnPhongLayout.handle);
+	lut::PipelineLayout pipeLayout = create_pipeline_layout(window, sceneLayout.handle, advancedLayout.handle);
 	lut::Pipeline pipe = create_pipeline(window, renderPass.handle, pipeLayout.handle);
 	lut::Pipeline viewPipe = create_view_direction_pipeline(window, renderPass.handle, pipeLayout.handle);
 	lut::Pipeline lightPipe = create_light_direction_pipeline(window, renderPass.handle, pipeLayout.handle);
@@ -396,7 +396,7 @@ int main() try
 				VMA_MEMORY_USAGE_GPU_ONLY
 			);
 
-			materialDescriptors[i] = lut::alloc_desc_set(window, dpool.handle, blinnPhongLayout.handle);
+			materialDescriptors[i] = lut::alloc_desc_set(window, dpool.handle, advancedLayout.handle);
 			{
 					VkWriteDescriptorSet desc[1]{};
 					VkDescriptorBufferInfo materialInfo{};
@@ -428,7 +428,7 @@ int main() try
 			VMA_MEMORY_USAGE_GPU_ONLY
 		);
 
-		pbrDescriptors[i] = lut::alloc_desc_set(window, dpool.handle, blinnPhongLayout.handle);
+		pbrDescriptors[i] = lut::alloc_desc_set(window, dpool.handle, advancedLayout.handle);
 		{
 			VkWriteDescriptorSet desc[1]{};
 			VkDescriptorBufferInfo materialInfo{};
@@ -836,10 +836,10 @@ namespace
 		return lut::RenderPass(aWindow.device, rpass);
 	}
 
-	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const& aContext, VkDescriptorSetLayout aSceneLayout, VkDescriptorSetLayout aBlinnPhongLayout)
+	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const& aContext, VkDescriptorSetLayout aSceneLayout, VkDescriptorSetLayout advancedLayout)
 	{
 
-		VkDescriptorSetLayout layouts[] = { aSceneLayout, aBlinnPhongLayout};
+		VkDescriptorSetLayout layouts[] = { aSceneLayout, advancedLayout};
 
 		//Creating the pipeline layout
 		VkPipelineLayoutCreateInfo layoutInfo{};
@@ -1639,7 +1639,7 @@ namespace
 		return lut::DescriptorSetLayout(aWindow.device, layout);
 	}
 
-	lut::DescriptorSetLayout create_blinnPhong_descriptor_layout(lut::VulkanWindow const& aWindow)
+	lut::DescriptorSetLayout create_advanced_descriptor_layout(lut::VulkanWindow const& aWindow)
 	{
 		VkDescriptorSetLayoutBinding bindings[1]{};
 		bindings[0].binding = 0;

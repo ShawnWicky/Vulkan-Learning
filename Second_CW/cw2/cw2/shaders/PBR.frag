@@ -59,7 +59,7 @@ void main()
 		vec3 halfwayDir = normalize(lightDir + viewDir);
 		float nh = max(dot(normal, halfwayDir), 0.f);
 		float nl = max(dot(normal, lightDir), 0.f);
-		float vh = dot(normal, halfwayDir);
+		float vh = dot(viewDir, halfwayDir);
 
 		//Fresnel Term
 		vec3 F = F0 + (1 - F0) * pow((1-dot(halfwayDir, viewDir)), 5); 
@@ -79,7 +79,7 @@ void main()
 		//specular 
 		vec3 Lspec = BRDF * uScene.light[i].colour.xyz * nl;
 
-		fragColour += vec4(Lspec, 1.f);
+		fragColour += vec4(G,G,G, 1.f);
 	}
 
 	outColour =  fragColour;
