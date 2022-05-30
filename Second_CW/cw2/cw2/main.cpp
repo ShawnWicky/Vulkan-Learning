@@ -153,7 +153,7 @@ namespace
 			glm::mat4 projection;
 			glm::mat4 projCam;
 			Light lights[4];
-alignas(16)	glm::vec3 camPos;
+			alignas(16)	glm::vec3 camPos;
 			int constant;
 		};
 
@@ -184,8 +184,7 @@ alignas(16)	glm::vec3 camPos;
 	///-----------------------------------------------------------------------
 	/// Load Obj files
 	///-----------------------------------------------------------------------
-	ModelData materialTest = load_obj_model(cfg::kNewMaterialtestPath);
-	ModelData newShip = load_obj_model(cfg::kNewShipPath);
+	ModelData newShip = load_obj_model(cfg::kNewMaterialtestPath);
 
 
 	// Local functions:
@@ -280,7 +279,7 @@ int main() try
 	/// initialize the light array
 	/// </summary>
 	glsl::SceneUniform sceneUniforms{};
-	
+
 	sceneUniforms.lights[0].position = glm::vec4(0.f, 9.3f, -3.f, 1.f);
 	sceneUniforms.lights[0].colour = glm::vec4(1.f, 1.f, 0.8f, 1.f);
 
@@ -1034,10 +1033,6 @@ namespace
 		vertexInputs[0].binding = 0;
 		vertexInputs[0].stride = sizeof(float) * 3;
 		vertexInputs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-		//normal
-		vertexInputs[1].binding = 1;
-		vertexInputs[1].stride = sizeof(float) * 3;    //change here 
-		vertexInputs[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
 		VkVertexInputAttributeDescription vertexAttributes[2]{};
 		//position
@@ -1045,18 +1040,13 @@ namespace
 		vertexAttributes[0].location = 0;
 		vertexAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
 		vertexAttributes[0].offset = 0;
-		//normal
-		vertexAttributes[1].binding = 1;
-		vertexAttributes[1].location = 1;
-		vertexAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;   // change here 
-		vertexAttributes[1].offset = 0;
 		//----------------------------------------------------VkPipelineVertexInputStateCreateInfo 
 
 		VkPipelineVertexInputStateCreateInfo inputInfo{};
 		inputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		inputInfo.vertexBindingDescriptionCount = 2;
+		inputInfo.vertexBindingDescriptionCount = 1;
 		inputInfo.pVertexBindingDescriptions = vertexInputs;
-		inputInfo.vertexAttributeDescriptionCount = 2;
+		inputInfo.vertexAttributeDescriptionCount = 1;
 		inputInfo.pVertexAttributeDescriptions = vertexAttributes;
 
 
@@ -1628,21 +1618,12 @@ namespace
 
 	lut::DescriptorSetLayout create_scene_descriptor_layout(lut::VulkanWindow const& aWindow)
 	{
-		VkDescriptorSetLayoutBinding bindings[3]{};
+		VkDescriptorSetLayoutBinding bindings[1]{};
 		bindings[0].binding = 0;
 		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		bindings[0].descriptorCount = 1;
 		bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		bindings[1].binding = 1;
-		bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		bindings[1].descriptorCount = 1;
-		bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-		bindings[2].binding = 2;
-		bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		bindings[2].descriptorCount = 1;
-		bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		//descriptor set layout
 		VkDescriptorSetLayoutCreateInfo layoutInfo{};
 		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1895,7 +1876,7 @@ namespace
 
 	void Camera::updateCameraPosition()
 	{
-		position += (forward * speedZ * speedScalar + right * speedX * speedScalar + up * speedY * speedScalar) * cfg::delta * 10.f;
+		position += (forward * speedZ * speedScalar + right * speedX * speedScalar + up * speedY * speedScalar) * cfg::delta * 20.f;
 	}
 
 	void Camera::processMouseMovement(float xoffset, float yoffset)

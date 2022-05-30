@@ -35,7 +35,7 @@ layout(location = 0) out vec4 outColour;
 
 void main()
 {
-	//modular code :)
+	//modular code
 	const float PI = 3.1415926f;
 	vec3 normal = normalize(v2fNormal);
 	vec3 viewDir = normalize(uScene.camPos - v2fPos);
