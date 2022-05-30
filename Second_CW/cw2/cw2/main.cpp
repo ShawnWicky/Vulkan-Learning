@@ -355,7 +355,7 @@ int main() try
 	//create descriptor pool
 	lut::DescriptorPool dpool = lut::create_descriptor_pool(window);
 
-#pragma region secene uniform, light and ambient buffer (with thier descriptorSets)
+#pragma region secene uniform, light buffer (with thier descriptorSets)
 	// create scene uniform buffer with lut::create_buffer()
 	lut::Buffer sceneUBO = lut::create_buffer(
 		allocator,
