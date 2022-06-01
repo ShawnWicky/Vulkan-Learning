@@ -164,13 +164,20 @@ namespace
 	void glfw_callback_mouse_button(GLFWwindow* window, int, int, int);
 
 	// Helpers:
+	//second render pass
 	lut::RenderPass create_render_pass(lut::VulkanWindow const&);
-
+	//first render pass
+	lut::RenderPass create_fullscreen_render_pass(lut::VulkanWindow const&);
+	
 	lut::DescriptorSetLayout create_scene_descriptor_layout(lut::VulkanWindow const&);
 	lut::DescriptorSetLayout create_advanced_descriptor_layout(lut::VulkanWindow const&);
 
 	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const&, VkDescriptorSetLayout, VkDescriptorSetLayout);
+	//sceond render pass
 	lut::Pipeline create_PBR_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
+	//first render pass
+	lut::Pipeline create_fullscreen_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
+
 
 	std::tuple<lut::Image, lut::ImageView> create_depth_buffer(lut::VulkanWindow const&, lut::Allocator const&);
 
@@ -181,6 +188,16 @@ namespace
 		VkImageView aDepthView
 	);
 
+	void create_fullscreen_framebuffers(
+		lut::VulkanWindow const&,
+		VkRenderPass,
+		std::vector<lut::Framebuffer>&,
+		VkImageView aPositionView,
+		VkImageView aNormalView,
+		VkImageView aAlbedoView,
+		VkImageView aDepthView
+	);
+
 	void update_scene_uniforms(
 		Camera& camera,
 		glsl::SceneUniform&,
@@ -188,7 +205,7 @@ namespace
 		std::uint32_t aFramebufferHeight
 	);
 
-
+	//record first render pass
 	void record_commands(
 		VkCommandBuffer,
 		VkRenderPass,
@@ -208,7 +225,27 @@ namespace
 		std::vector<VkDescriptorSet> aPBRDescriptors
 		//--------------------------------------
 	);
+	/* record sceond render pass
+	void record_fullscreen_commands(
+		VkCommandBuffer,
+		VkRenderPass,
+		VkFramebuffer,
+		VkPipeline,
+		VkExtent2D const&,
+		//--------------------------------------
+		ColourMesh&,
 
+		VkBuffer aSceneUBO,
+		std::vector<lut::Buffer>&,
+
+		glsl::SceneUniform const&,
+
+		VkPipelineLayout,
+		VkDescriptorSet aSceneDescriptors,
+		std::vector<VkDescriptorSet> aPBRDescriptors
+		//--------------------------------------
+	);
+	*/
 	void submit_commands(
 		lut::VulkanWindow const&,
 		VkCommandBuffer,
