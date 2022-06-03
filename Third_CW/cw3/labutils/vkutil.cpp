@@ -176,7 +176,7 @@ namespace labutils
 		return dset;
 	}
 
-	ImageView create_image_view_texture2d(VulkanContext const& aContext, VkImage aImage, VkFormat aFormat)
+	ImageView create_image_view(VulkanContext const& aContext, VkImage aImage, VkFormat aFormat)
 	{
 		VkImageViewCreateInfo viewInfo{};
 		viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -219,4 +219,28 @@ namespace labutils
 		return Sampler(aContext.device, sampler);
 	}
 
+	Sampler create_colour_sampler(VulkanContext const& aContext)
+	{
+		VkSamplerCreateInfo samplerInfo{};
+		samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+		samplerInfo.magFilter = VK_FILTER_NEAREST;
+		samplerInfo.minFilter = VK_FILTER_NEAREST;
+		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.anisotropyEnable = VK_TRUE;
+		samplerInfo.maxAnisotropy = 16;
+		samplerInfo.minLod = 0.f;
+		samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+		samplerInfo.mipLodBias = 0.f;
+
+		VkSampler sampler = VK_NULL_HANDLE;
+
+		if (auto const res = vkCreateSampler(aContext.device, &samplerInfo, nullptr, &sampler); VK_SUCCESS != res)
+		{
+			throw Error("Unable to create Sampler\n" "vkCreateSampler() returned %s", to_string(res).c_str());
+		}
+
+		return Sampler(aContext.device, sampler);
+	}
 }

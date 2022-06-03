@@ -1,42 +1,5 @@
-#include <volk/volk.h>
-
-#include <tuple>
-#include <chrono>
-#include <limits>
-#include <vector>
-#include <stdexcept>
-
-#include <cstdio>
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
-#include <cstring>
-
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-
-#if !defined(GLM_FORCE_RADIANS)
-#	define GLM_FORCE_RADIANS
-#endif
-#include <glm/glm.hpp>
-#include <glm/gtx/transform.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include "../labutils/to_string.hpp"
-#include "../labutils/vulkan_window.hpp"
-
-#include "../labutils/angle.hpp"
-using namespace labutils::literals;
-
-#include "../labutils/error.hpp"
-#include "../labutils/vkutil.hpp"
-#include "../labutils/vkimage.hpp"
-#include "../labutils/vkobject.hpp"
-#include "../labutils/vkbuffer.hpp"
-#include "../labutils/allocator.hpp" 
-namespace lut = labutils;
-
 #include "model.hpp"
+#include "fullScreenPass.hpp"
 
 namespace
 {
@@ -47,6 +10,9 @@ namespace
 #		define SHADERDIR_ "assets/cw3/shaders/"
 		constexpr char const* kVertShaderPath = SHADERDIR_ "PBR.vert.spv";
 		constexpr char const* kFragShaderPath = SHADERDIR_ "PBR.frag.spv";
+
+		constexpr char const* kfirstPassVertPath = SHADERDIR_ "MRT.vert.spv";
+		constexpr char const* kfirstPassFragPath = SHADERDIR_ "MRT.frag.spv";
 #		undef SHADERDIR_
 
 #		define ASSETDIR_ "assets/cw3/"
@@ -64,7 +30,9 @@ namespace
 		constexpr auto kCameraFov    = 60.0_degf;
 
 		constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
-
+		constexpr VkFormat kNormalFormat = VK_FORMAT_A2R10G10B10_UNORM_PACK32;
+		constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;
+		constexpr VkFormat kPositionFormat = VK_FORMAT_R8G8B8A8_SRGB;
 		//For Camera
 		bool firstMouse = true;
 		bool enableMouse = false;
@@ -164,23 +132,17 @@ namespace
 	void glfw_callback_mouse_button(GLFWwindow* window, int, int, int);
 
 	// Helpers:
-	//second render pass
-	lut::RenderPass create_render_pass(lut::VulkanWindow const&);
-	//first render pass
-	lut::RenderPass create_fullscreen_render_pass(lut::VulkanWindow const&);
+
+	lut::DescriptorSetLayout create_second_render_pass_layout(lut::VulkanWindow const&);
 	
-	lut::DescriptorSetLayout create_scene_descriptor_layout(lut::VulkanWindow const&);
-	lut::DescriptorSetLayout create_advanced_descriptor_layout(lut::VulkanWindow const&);
-
-	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const&, VkDescriptorSetLayout, VkDescriptorSetLayout);
-	//sceond render pass
-	lut::Pipeline create_PBR_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
-	//first render pass
-	lut::Pipeline create_fullscreen_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
-
-
+	lut::PipelineLayout create_second_pipeline_layout(lut::VulkanContext const&, VkDescriptorSetLayout, VkDescriptorSetLayout);
+	//second render pass
+	lut::RenderPass create_second_render_pass(lut::VulkanWindow const&);
+	lut::Pipeline create_second_pipeline(lut::VulkanWindow const&, VkRenderPass, VkPipelineLayout);
+	
 	std::tuple<lut::Image, lut::ImageView> create_depth_buffer(lut::VulkanWindow const&, lut::Allocator const&);
 
+	//final framebuffer
 	void create_swapchain_framebuffers(
 		lut::VulkanWindow const&,
 		VkRenderPass,
@@ -188,16 +150,7 @@ namespace
 		VkImageView aDepthView
 	);
 
-	void create_fullscreen_framebuffers(
-		lut::VulkanWindow const&,
-		VkRenderPass,
-		std::vector<lut::Framebuffer>&,
-		VkImageView aPositionView,
-		VkImageView aNormalView,
-		VkImageView aAlbedoView,
-		VkImageView aDepthView
-	);
-
+	//temporary framebuffer
 	void update_scene_uniforms(
 		Camera& camera,
 		glsl::SceneUniform&,
@@ -205,31 +158,12 @@ namespace
 		std::uint32_t aFramebufferHeight
 	);
 
-	//record first render pass
 	void record_commands(
 		VkCommandBuffer,
 		VkRenderPass,
-		VkFramebuffer,
-		VkPipeline,
-		VkExtent2D const&,
-		//--------------------------------------
-		ColourMesh&,
-
-		VkBuffer aSceneUBO,
-		std::vector<lut::Buffer>&,
-
-		glsl::SceneUniform const&,
-
-		VkPipelineLayout,
-		VkDescriptorSet aSceneDescriptors,
-		std::vector<VkDescriptorSet> aPBRDescriptors
-		//--------------------------------------
-	);
-	/* record sceond render pass
-	void record_fullscreen_commands(
-		VkCommandBuffer,
 		VkRenderPass,
 		VkFramebuffer,
+		VkFramebuffer,
 		VkPipeline,
 		VkExtent2D const&,
 		//--------------------------------------
@@ -245,7 +179,7 @@ namespace
 		std::vector<VkDescriptorSet> aPBRDescriptors
 		//--------------------------------------
 	);
-	*/
+	
 	void submit_commands(
 		lut::VulkanWindow const&,
 		VkCommandBuffer,
@@ -299,19 +233,24 @@ int main() try
 	lut::Allocator allocator = lut::create_allocator(window);
 
 	// Intialize resources
-	lut::RenderPass renderPass = create_render_pass(window);
+	lut::RenderPass renderPass = create_second_render_pass(window);
+	lut::RenderPass fullscreen_renderPass = create_fullscreen_render_pass(window, cfg::kPositionFormat, cfg::kNormalFormat, cfg::kAlbedoFormat, cfg::kDepthFormat);
 
 	//create scene descriptor set layout
 	//call create_scene_descriptor_layout
 	lut::DescriptorSetLayout sceneLayout = create_scene_descriptor_layout(window);
 	lut::DescriptorSetLayout advancedLayout = create_advanced_descriptor_layout(window);
-
+	lut::DescriptorSetLayout secondPassLayout = create_second_render_pass_layout(window);
 	//create pipeline layout
-	lut::PipelineLayout pipeLayout = create_pipeline_layout(window, sceneLayout.handle, advancedLayout.handle);
-	lut::Pipeline pbrPipe = create_PBR_pipeline(window, renderPass.handle, pipeLayout.handle);
+	lut::PipelineLayout pipeLayout = create_fullscreen_pipeline_layout(window, sceneLayout.handle, advancedLayout.handle);
+	lut::PipelineLayout secondPipeLayout = create_second_pipeline_layout(window, sceneLayout.handle, secondPassLayout.handle);
+	lut::Pipeline pbrPipe = create_fullscreen_pipeline(window, fullscreen_renderPass.handle, pipeLayout.handle, cfg::kfirstPassVertPath, cfg::kfirstPassFragPath);
+	lut::Pipeline sceondPipe = create_second_pipeline(window, renderPass.handle, secondPipeLayout.handle);
 
 	//create depth buffer
 	auto [depthBuffer, depthBufferView] = create_depth_buffer(window, allocator);
+
+	//swapchain framebuffers
 	std::vector<lut::Framebuffer> framebuffers;
 	create_swapchain_framebuffers(window, renderPass.handle, framebuffers, depthBufferView.handle);
 
@@ -338,6 +277,8 @@ int main() try
 	//create descriptor pool
 	lut::DescriptorPool dpool = lut::create_descriptor_pool(window);
 
+	lut::Sampler defaultSampler = lut::create_default_sampler(window);
+	lut::Sampler colourSampler = lut::create_colour_sampler(window);
 #pragma region secene uniform, light and ambient buffer (with thier descriptorSets)
 	// create scene uniform buffer with lut::create_buffer()
 	lut::Buffer sceneUBO = lut::create_buffer(
@@ -367,7 +308,7 @@ int main() try
 	}
 #pragma endregion
 
-#pragma region 2.3 material uniform buffers and descriptors
+#pragma region material uniform buffers and descriptors
 	std::vector<lut::Buffer> pbrBuffers(newShip.materials.size());
 	std::vector<VkDescriptorSet> pbrDescriptors(newShip.materials.size());
 	for (int i = 0; i < newShip.materials.size(); i++)
@@ -399,8 +340,75 @@ int main() try
 	}
 #pragma endregion
 
+	lut::Image position_image = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, cfg::kPositionFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	lut::ImageView position_view = lut::create_image_view(window, position_image.image, cfg::kPositionFormat);
 
-	lut::Sampler defaultSampler = lut::create_default_sampler(window);
+	lut::Image normal_image = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, cfg::kNormalFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	lut::ImageView normal_view = lut::create_image_view(window, normal_image.image, cfg::kNormalFormat);
+
+	lut::Image albedo_image = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, cfg::kAlbedoFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	lut::ImageView albedo_view = lut::create_image_view(window, albedo_image.image, cfg::kAlbedoFormat);
+
+	lut::Image emissive_image = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, cfg::kAlbedoFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	lut::ImageView emissive_view = lut::create_image_view(window, emissive_image.image, cfg::kAlbedoFormat);
+	//fullscreen framebuffers
+	std::vector<lut::Framebuffer> offscreen_framebuffers;
+	create_fullscreen_framebuffers(allocator, window, fullscreen_renderPass.handle, offscreen_framebuffers, position_view.handle, normal_view.handle, albedo_view.handle, emissive_view.handle, depthBufferView.handle);
+
+	VkDescriptorSet textureSet = lut::alloc_desc_set(window, dpool.handle, secondPassLayout.handle);
+	{
+		VkWriteDescriptorSet desc[4]{};
+		VkDescriptorImageInfo positionInfo{};
+		positionInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		positionInfo.imageView = position_view.handle;
+		positionInfo.sampler = defaultSampler.handle;
+
+		VkDescriptorImageInfo normalInfo{};
+		normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		normalInfo.imageView = normal_view.handle;
+		normalInfo.sampler = defaultSampler.handle;
+
+		VkDescriptorImageInfo albedoInfo{};
+		albedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		albedoInfo.imageView = albedo_view.handle;
+		albedoInfo.sampler = colourSampler.handle;
+
+		VkDescriptorImageInfo emissiveInfo{};
+		albedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		albedoInfo.imageView = emissive_view.handle;
+		albedoInfo.sampler = colourSampler.handle;
+
+		desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		desc[0].dstSet = textureSet;
+		desc[0].dstBinding = 0;
+		desc[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		desc[0].descriptorCount = 1;
+		desc[0].pImageInfo = &positionInfo;
+
+		desc[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		desc[1].dstSet = textureSet;
+		desc[1].dstBinding = 1;
+		desc[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		desc[1].descriptorCount = 1;
+		desc[1].pImageInfo = &normalInfo;
+
+		desc[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		desc[2].dstSet = textureSet;
+		desc[2].dstBinding = 2;
+		desc[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		desc[2].descriptorCount = 1;
+		desc[2].pImageInfo = &albedoInfo;
+
+		desc[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		desc[3].dstSet = textureSet;
+		desc[3].dstBinding = 3;
+		desc[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		desc[3].descriptorCount = 1;
+		desc[3].pImageInfo = &emissiveInfo;
+
+		constexpr auto numSets = sizeof(desc) / sizeof(desc[0]);
+		vkUpdateDescriptorSets(window.device, numSets, desc, 0, nullptr);
+	}
 
 	bool recreateSwapchain = false;
 
@@ -424,12 +432,12 @@ int main() try
 			auto const changes = lut::recreate_swapchain(window);
 			if (changes.changedFormat)
 			{
-				renderPass = create_render_pass(window);
+				renderPass = create_second_render_pass(window);
 			}
 
 			if (changes.changedSize)
 			{
-				pbrPipe = create_PBR_pipeline(window, renderPass.handle, pipeLayout.handle);
+				pbrPipe = create_fullscreen_pipeline(window, fullscreen_renderPass.handle, pipeLayout.handle, cfg::kfirstPassVertPath, cfg::kfirstPassFragPath);
 			}
 			//TODO: (Section 6) re-create depth buffer image
 			if (changes.changedSize)
@@ -483,7 +491,9 @@ int main() try
 		record_commands(
 			cbuffers[imageIndex],
 			renderPass.handle,
+			fullscreen_renderPass.handle,
 			framebuffers[imageIndex].handle,
+			offscreen_framebuffers[imageIndex].handle,
 
 			pbrPipe.handle,
 			window.swapchainExtent,
@@ -676,10 +686,10 @@ namespace
 
 namespace
 {
-	lut::RenderPass create_render_pass(lut::VulkanWindow const& aWindow)
+	lut::RenderPass create_second_render_pass(lut::VulkanWindow const& aWindow)
 	{
 		//Render Pass attachments
-		VkAttachmentDescription attachments[2]{};
+		VkAttachmentDescription attachments[1]{};
 		attachments[0].format = aWindow.swapchainFormat;
 		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
 		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -687,33 +697,22 @@ namespace
 		attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 		attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-		attachments[1].format = cfg::kDepthFormat;
-		attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-		attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
 		//Supass Definition
 		VkAttachmentReference subpassAttachments[1]{};
 		subpassAttachments[0].attachment = 0; // this refers to attachments[0]
 		subpassAttachments[0].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		VkAttachmentReference depthAttachment{};
-		depthAttachment.attachment = 1; // this refers to attachments[1]
-		depthAttachment.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
 		VkSubpassDescription subpasses[1]{};
 		subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		subpasses[0].colorAttachmentCount = 1;
 		subpasses[0].pColorAttachments = subpassAttachments;
-		subpasses[0].pDepthStencilAttachment = &depthAttachment;
+		subpasses[0].pDepthStencilAttachment = nullptr;
 
 		//RenderPass Creation
 		//reference the structures above 
 		VkRenderPassCreateInfo passInfo{};
 		passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-		passInfo.attachmentCount = 2;
+		passInfo.attachmentCount = 1;
 		passInfo.pAttachments = attachments; //Render Pass attachments
 		passInfo.subpassCount = 1;
 		passInfo.pSubpasses = subpasses;     //Supass Definition
@@ -729,10 +728,9 @@ namespace
 		return lut::RenderPass(aWindow.device, rpass);
 	}
 
-	lut::PipelineLayout create_pipeline_layout(lut::VulkanContext const& aContext, VkDescriptorSetLayout aSceneLayout, VkDescriptorSetLayout aAdvancedLayout)
+	lut::PipelineLayout create_second_pipeline_layout(lut::VulkanContext const& aContext, VkDescriptorSetLayout aSceneLayout, VkDescriptorSetLayout aSecondLayout)
 	{
-
-		VkDescriptorSetLayout layouts[] = { aSceneLayout, aAdvancedLayout };
+		VkDescriptorSetLayout layouts[] = { aSceneLayout, aSecondLayout };
 
 		//Creating the pipeline layout
 		VkPipelineLayoutCreateInfo layoutInfo{};
@@ -750,7 +748,7 @@ namespace
 		return lut::PipelineLayout(aContext.device, layout);
 	}
 
-	lut::Pipeline create_PBR_pipeline(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, VkPipelineLayout aPipelineLayout)
+	lut::Pipeline create_second_pipeline(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, VkPipelineLayout aPipelineLayout)
 	{
 		//first step  : load shader modules
 		lut::ShaderModule vert = lut::load_shader_module(aWindow, cfg::kVertShaderPath);
@@ -771,36 +769,13 @@ namespace
 		stages[1].module = frag.handle;
 		stages[1].pName = "main";
 
-		//----------------------------------------------------VkPipelineVertexInputStateCreateInfo
-		VkVertexInputBindingDescription vertexInputs[2]{};
-		//position
-		vertexInputs[0].binding = 0;
-		vertexInputs[0].stride = sizeof(float) * 3;
-		vertexInputs[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-		//normal
-		vertexInputs[1].binding = 1;
-		vertexInputs[1].stride = sizeof(float) * 3;
-		vertexInputs[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-		VkVertexInputAttributeDescription vertexAttributes[2]{};
-		//position
-		vertexAttributes[0].binding = 0;
-		vertexAttributes[0].location = 0;
-		vertexAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-		vertexAttributes[0].offset = 0;
-		//normal
-		vertexAttributes[1].binding = 1;
-		vertexAttributes[1].location = 1;
-		vertexAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-		vertexAttributes[1].offset = 0;
-		//----------------------------------------------------VkPipelineVertexInputStateCreateInfo 
-
-		VkPipelineVertexInputStateCreateInfo inputInfo{};
-		inputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		inputInfo.vertexBindingDescriptionCount = 2;
-		inputInfo.pVertexBindingDescriptions = vertexInputs;
-		inputInfo.vertexAttributeDescriptionCount = 2;
-		inputInfo.pVertexAttributeDescriptions = vertexAttributes;
-
+		VkPipelineVertexInputStateCreateInfo emptyInputState;
+		emptyInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+		emptyInputState.vertexAttributeDescriptionCount = 0;
+		emptyInputState.pVertexAttributeDescriptions = nullptr;
+		emptyInputState.vertexBindingDescriptionCount = 0;
+		emptyInputState.pVertexBindingDescriptions = nullptr;
+		emptyInputState.flags = 0;
 
 		//for rasterization
 		VkPipelineInputAssemblyStateCreateInfo assemblyInfo{};
@@ -837,7 +812,7 @@ namespace
 		rasterInfo.depthClampEnable = VK_FALSE;
 		rasterInfo.rasterizerDiscardEnable = VK_FALSE;
 		rasterInfo.polygonMode = VK_POLYGON_MODE_FILL;
-		rasterInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+		rasterInfo.cullMode = VK_CULL_MODE_FRONT_BIT;
 		rasterInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;  // like OpenGL
 		rasterInfo.depthBiasEnable = VK_FALSE;
 		rasterInfo.lineWidth = 1.0f;
@@ -848,15 +823,6 @@ namespace
 		sampleInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		sampleInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-		//Depth/Stencil State    not now
-		VkPipelineDepthStencilStateCreateInfo depthInfo{};
-		depthInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-		depthInfo.depthTestEnable = VK_TRUE;
-		depthInfo.depthWriteEnable = VK_TRUE;
-		depthInfo.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-		depthInfo.minDepthBounds = 0.f;
-		depthInfo.maxDepthBounds = 1.f;
-
 		//Color Blend State  
 		//mask 
 		VkPipelineColorBlendAttachmentState blendStates[1]{};
@@ -865,7 +831,7 @@ namespace
 
 		VkPipelineColorBlendStateCreateInfo blendInfo{};
 		blendInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		blendInfo.attachmentCount = 1;
+		blendInfo.attachmentCount = sizeof(blendStates)/sizeof(blendStates[0]);
 		blendInfo.pAttachments = blendStates;
 
 		//Dynamic States  not now
@@ -875,7 +841,7 @@ namespace
 		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 		pipelineInfo.stageCount = 2;  //vert frag
 		pipelineInfo.pStages = stages;
-		pipelineInfo.pVertexInputState = &inputInfo;
+		pipelineInfo.pVertexInputState = &emptyInputState;
 		pipelineInfo.pInputAssemblyState = &assemblyInfo;
 		pipelineInfo.pViewportState = &viewportInfo;
 		pipelineInfo.pRasterizationState = &rasterInfo;
@@ -885,7 +851,7 @@ namespace
 		pipelineInfo.renderPass = aRenderPass;
 		pipelineInfo.subpass = 0;
 		pipelineInfo.pTessellationState = nullptr;
-		pipelineInfo.pDepthStencilState = &depthInfo;
+		pipelineInfo.pDepthStencilState = nullptr;
 		pipelineInfo.pDynamicState = nullptr;
 
 		VkPipeline pipe = VK_NULL_HANDLE;
@@ -895,7 +861,6 @@ namespace
 		}
 
 		return lut::Pipeline(aWindow.device, pipe);
-
 	}
 
 	void create_swapchain_framebuffers(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, std::vector<lut::Framebuffer>& aFramebuffers, VkImageView aDepthView)
@@ -930,45 +895,23 @@ namespace
 		assert(aWindow.swapViews.size() == aFramebuffers.size());
 	}
 
-	lut::DescriptorSetLayout create_scene_descriptor_layout(lut::VulkanWindow const& aWindow)
+	lut::DescriptorSetLayout create_second_render_pass_layout(lut::VulkanWindow const& aWindow)
 	{
 		VkDescriptorSetLayoutBinding bindings[3]{};
 		bindings[0].binding = 0;
-		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		bindings[0].descriptorCount = 1;
-		bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
 		bindings[1].binding = 1;
-		bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		bindings[1].descriptorCount = 1;
 		bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
 		bindings[2].binding = 2;
-		bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		bindings[2].descriptorCount = 1;
 		bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-		//descriptor set layout
-		VkDescriptorSetLayoutCreateInfo layoutInfo{};
-		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		layoutInfo.bindingCount = sizeof(bindings) / sizeof(bindings[0]);
-		layoutInfo.pBindings = bindings;
-
-		VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-		if (auto const res = vkCreateDescriptorSetLayout(aWindow.device, &layoutInfo, nullptr, &layout); VK_SUCCESS != res)
-		{
-			throw lut::Error("Unable to create descriptor set layout\n" "vkCreateDescriptorSetLayout() returned %s", lut::to_string(res).c_str());
-		}
-
-		return lut::DescriptorSetLayout(aWindow.device, layout);
-	}
-
-	lut::DescriptorSetLayout create_advanced_descriptor_layout(lut::VulkanWindow const& aWindow)
-	{
-		VkDescriptorSetLayoutBinding bindings[1]{};
-		bindings[0].binding = 0;
-		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		bindings[0].descriptorCount = 1;
-		bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
 		//descriptor set layout
 		VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -988,7 +931,9 @@ namespace
 	void record_commands(
 		VkCommandBuffer aCmdBuff,
 		VkRenderPass aRenderPass,
+		VkRenderPass aFullscreenRenderPass,
 		VkFramebuffer aFramebuffer,
+		VkFramebuffer aFullscreenFramebuffer,
 
 		VkPipeline aPBRPipe,
 		VkExtent2D const& aImageExtent,
@@ -1033,55 +978,106 @@ namespace
 				lut::buffer_barrier(aCmdBuff, aPBR[i].buffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 		}
 		
-		//Render Pass
-		VkClearValue clearValues[2]{};
-		clearValues[0].color.float32[0] = 0.1f;
-		clearValues[0].color.float32[1] = 0.1f;
-		clearValues[0].color.float32[2] = 0.1f;
-		clearValues[0].color.float32[3] = 1.0f;
-		clearValues[1].depthStencil.depth = 1.0f;
-
-		VkRenderPassBeginInfo passInfo{};
-		passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-		passInfo.renderPass = aRenderPass;
-		passInfo.framebuffer = aFramebuffer;
-		passInfo.renderArea.offset = VkOffset2D{ 0, 0 };
-		passInfo.renderArea.extent = aImageExtent;
-		passInfo.clearValueCount = 2;
-		passInfo.pClearValues = clearValues;
-
-		vkCmdBeginRenderPass(aCmdBuff, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-
-		//drawing with pipeline
-		vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 0, 1, &aSceneDescriptors, 0, nullptr);
-		//----------------------------------
-
-		vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aPBRPipe);
-		// Bind vertex input
-		for (int i = 0; i < aColourMesh.positions.size(); i++)
+		//first render pass
 		{
-			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 1, 1, &aPBRDescriptors[newShip.meshes[i].materialIndex], 0, nullptr);
+			//Render Pass
+			VkClearValue clearValues[2]{};
+			clearValues[0].color.float32[0] = 0.1f;
+			clearValues[0].color.float32[1] = 0.1f;
+			clearValues[0].color.float32[2] = 0.1f;
+			clearValues[0].color.float32[3] = 1.0f;
+			clearValues[1].depthStencil.depth = 1.0f;
 
-			auto& pos = aColourMesh.positions;
-			auto& norm = aColourMesh.normals;
-			VkBuffer buffers[2] = { pos[i].buffer, norm[i].buffer };
-			VkDeviceSize offsets[2]{};
-			vkCmdBindVertexBuffers(aCmdBuff, 0, 2, buffers, offsets);
-			vkCmdDraw(aCmdBuff, aColourMesh.vertexCount[i], 1, 0, 0);
+			VkRenderPassBeginInfo passInfo{};
+			passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+			passInfo.renderPass = aFullscreenRenderPass;
+			passInfo.framebuffer = aFullscreenFramebuffer;
+			passInfo.renderArea.offset = VkOffset2D{ 0, 0 };
+			passInfo.renderArea.extent = aImageExtent;
+			passInfo.clearValueCount = 2;
+			passInfo.pClearValues = clearValues;
+
+			vkCmdBeginRenderPass(aCmdBuff, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+
+			//drawing with pipeline
+			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 0, 1, &aSceneDescriptors, 0, nullptr);
+			//----------------------------------
+
+			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aPBRPipe);
+			// Bind vertex input
+			for (int i = 0; i < aColourMesh.positions.size(); i++)
+			{
+				vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 1, 1, &aPBRDescriptors[newShip.meshes[i].materialIndex], 0, nullptr);
+
+				auto& pos = aColourMesh.positions;
+				auto& norm = aColourMesh.normals;
+				VkBuffer buffers[2] = { pos[i].buffer, norm[i].buffer };
+				VkDeviceSize offsets[2]{};
+				vkCmdBindVertexBuffers(aCmdBuff, 0, 2, buffers, offsets);
+				vkCmdDraw(aCmdBuff, aColourMesh.vertexCount[i], 1, 0, 0);
+			}
+
+			vkCmdEndRenderPass(aCmdBuff);
+			//end recording
+			if (auto const res = vkEndCommandBuffer(aCmdBuff); VK_SUCCESS != res)
+			{
+				throw lut::Error("Unable to end recording command buffer\n" "vkEndCommandBuffer() returned %s", lut::to_string(res).c_str());
+			}
 		}
 
-		vkCmdEndRenderPass(aCmdBuff);
-		//end recording
-		if (auto const res = vkEndCommandBuffer(aCmdBuff); VK_SUCCESS != res)
+
+		//sceond render pass
 		{
-			throw lut::Error("Unable to end recording command buffer\n" "vkEndCommandBuffer() returned %s", lut::to_string(res).c_str());
+			//Render Pass
+			VkClearValue clearValues[2]{};
+			clearValues[0].color.float32[0] = 0.1f;
+			clearValues[0].color.float32[1] = 0.1f;
+			clearValues[0].color.float32[2] = 0.1f;
+			clearValues[0].color.float32[3] = 1.0f;
+			clearValues[1].depthStencil.depth = 1.0f;
+
+			VkRenderPassBeginInfo passInfo{};
+			passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+			passInfo.renderPass = aRenderPass;
+			passInfo.framebuffer = aFramebuffer;
+			passInfo.renderArea.offset = VkOffset2D{ 0, 0 };
+			passInfo.renderArea.extent = aImageExtent;
+			passInfo.clearValueCount = 2;
+			passInfo.pClearValues = clearValues;
+
+			vkCmdBeginRenderPass(aCmdBuff, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+
+			//drawing with pipeline
+			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 0, 1, &aSceneDescriptors, 0, nullptr);
+			//----------------------------------
+
+			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aPBRPipe);
+			// Bind vertex input
+			for (int i = 0; i < aColourMesh.positions.size(); i++)
+			{
+				vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aGraphicsLayout, 1, 1, &aPBRDescriptors[newShip.meshes[i].materialIndex], 0, nullptr);
+
+				auto& pos = aColourMesh.positions;
+				auto& norm = aColourMesh.normals;
+				VkBuffer buffers[2] = { pos[i].buffer, norm[i].buffer };
+				VkDeviceSize offsets[2]{};
+				vkCmdBindVertexBuffers(aCmdBuff, 0, 2, buffers, offsets);
+				vkCmdDraw(aCmdBuff, aColourMesh.vertexCount[i], 1, 0, 0);
+			}
+
+			vkCmdEndRenderPass(aCmdBuff);
+			//end recording
+			if (auto const res = vkEndCommandBuffer(aCmdBuff); VK_SUCCESS != res)
+			{
+				throw lut::Error("Unable to end recording command buffer\n" "vkEndCommandBuffer() returned %s", lut::to_string(res).c_str());
+			}
 		}
 	}
 
 	void submit_commands(lut::VulkanWindow const& aWindow, VkCommandBuffer aCmdBuff, VkFence aFence, VkSemaphore aWaitSemaphore, VkSemaphore aSignalSemaphore)
 	{
-		//throw lut::Error( "Not yet implemented" ); //TODO: (Section 1/Exercise 3) implement me!
 		VkPipelineStageFlags waitPipelineStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 		VkSubmitInfo submitInfo{};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
