@@ -6,7 +6,9 @@
 #include <cassert>
 
 #include "../labutils/error.hpp"
+#include "../labutils/to_string.hpp"
 namespace lut = labutils;
+
 
 // ModelData
 ModelData::ModelData() noexcept = default;
@@ -235,4 +237,147 @@ ModelData load_obj_model( std::string_view const& aOBJPath )
 	assert( model.vertexTextureCoords.size() == totalVertices );
 	
 	return model;
+}
+
+ColourMesh createObjBuffer(ModelData const& aCar, lut::VulkanContext const& aContext, lut::Allocator const& aAllocator)
+{
+	ColourMesh temp;
+
+	std::vector<glm::vec3> meshVertices;
+	std::vector<glm::vec3> meshNormals;
+
+	for (int i = 0; i < aCar.meshes.size(); i++)
+	{
+		for (int j = 0; j < aCar.meshes[i].numberOfVertices; j++)
+		{
+			meshVertices.emplace_back(aCar.vertexPositions[aCar.meshes[i].vertexStartIndex + j]);
+			meshNormals.emplace_back(aCar.vertexNormals[aCar.meshes[i].vertexStartIndex + j]);
+		}
+
+		lut::Buffer vertexPosGPU = lut::create_buffer(
+			aAllocator,
+			sizeof(glm::vec3) * meshVertices.size(),
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VMA_MEMORY_USAGE_GPU_ONLY
+		);
+
+		lut::Buffer vertexNormGPU = lut::create_buffer(
+			aAllocator,
+			sizeof(glm::vec3) * meshNormals.size(),
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VMA_MEMORY_USAGE_GPU_ONLY
+		);
+
+		lut::Buffer posStaging = lut::create_buffer(
+			aAllocator,
+			sizeof(glm::vec3) * meshVertices.size(),
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VMA_MEMORY_USAGE_CPU_TO_GPU
+		);
+
+		lut::Buffer normStaging = lut::create_buffer(
+			aAllocator,
+			sizeof(glm::vec3) * meshNormals.size(),
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VMA_MEMORY_USAGE_CPU_TO_GPU
+		);
+
+		void* posPtr = nullptr;
+
+		if (auto const res = vmaMapMemory(aAllocator.allocator, posStaging.allocation, &posPtr); VK_SUCCESS != res)
+		{
+			throw lut::Error("Mapping memory for writing\n" "vmaMapMemory() returned %s", lut::to_string(res).c_str());
+		}
+		std::memcpy(posPtr, meshVertices.data(), sizeof(glm::vec3) * meshVertices.size());
+		vmaUnmapMemory(aAllocator.allocator, posStaging.allocation);
+
+
+		void* normPtr = nullptr;
+
+		if (auto const res = vmaMapMemory(aAllocator.allocator, normStaging.allocation, &normPtr); VK_SUCCESS != res)
+		{
+			throw lut::Error("Mapping memory for writing\n" "vmaMapMemory() returned %s", lut::to_string(res).c_str());
+		}
+		std::memcpy(normPtr, meshNormals.data(), sizeof(glm::vec3) * meshNormals.size());
+		vmaUnmapMemory(aAllocator.allocator, normStaging.allocation);
+
+		lut::Fence uploadComplete = create_fence(aContext);
+
+		lut::CommandPool uploadPool = create_command_pool(aContext);
+		VkCommandBuffer uploadCmd = alloc_command_buffer(aContext, uploadPool.handle);
+
+		/// <summary>
+		/// record the copy commands into the command buffer
+		/// </summary>
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = 0;
+		beginInfo.pInheritanceInfo = nullptr;
+
+		if (auto const res = vkBeginCommandBuffer(uploadCmd, &beginInfo); VK_SUCCESS != res)
+		{
+			throw lut::Error("Beginning command buffer recording\n" "vkBeginCommandBuffer() returned %s", lut::to_string(res).c_str());
+		}
+
+		VkBufferCopy pcopy{};
+		pcopy.size = sizeof(glm::vec3) * meshVertices.size();
+
+		vkCmdCopyBuffer(uploadCmd, posStaging.buffer, vertexPosGPU.buffer, 1, &pcopy);
+
+		lut::buffer_barrier(
+			uploadCmd,
+			vertexPosGPU.buffer,
+			VK_ACCESS_TRANSFER_WRITE_BIT,
+			VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_VERTEX_INPUT_BIT
+		);
+
+		VkBufferCopy ccopy{};
+		ccopy.size = sizeof(glm::vec3) * meshNormals.size();
+
+		vkCmdCopyBuffer(uploadCmd, normStaging.buffer, vertexNormGPU.buffer, 1, &ccopy);
+
+		lut::buffer_barrier(
+			uploadCmd,
+			vertexNormGPU.buffer,
+			VK_ACCESS_TRANSFER_WRITE_BIT,
+			VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_VERTEX_INPUT_BIT
+		);
+
+		if (auto const res = vkEndCommandBuffer(uploadCmd); VK_SUCCESS != res)
+		{
+			throw lut::Error("Ending command buffer recording\n" "vkEndCommandBuffer() returned %s", lut::to_string(res).c_str());
+		}
+
+
+		/// <summary>
+		/// submit transfer commands
+		/// </summary>
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &uploadCmd;
+
+		if (auto const res = vkQueueSubmit(aContext.graphicsQueue, 1, &submitInfo, uploadComplete.handle); VK_SUCCESS != res)
+		{
+			throw lut::Error("Submitting commands\n" "vkQueueSubmit() reuturned %s", lut::to_string(res).c_str());
+		}
+
+		if (auto const res = vkWaitForFences(aContext.device, 1, &uploadComplete.handle, VK_TRUE, std::numeric_limits<std::uint64_t>::max()); VK_SUCCESS != res)
+		{
+			throw lut::Error("Waiting for upload to complete\n" "vkWaitForFences() returned %s", lut::to_string(res).c_str());
+		}
+
+		temp.positions.emplace_back(std::move(vertexPosGPU));
+		temp.normals.emplace_back(std::move(vertexNormGPU));
+		temp.vertexCount.emplace_back(aCar.meshes[i].numberOfVertices);
+
+		meshVertices.clear();
+		meshNormals.clear();
+	}
+
+	return temp;
 }

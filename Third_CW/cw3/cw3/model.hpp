@@ -13,6 +13,12 @@
 #include <glm/glm.hpp>
 #include <tiny_obj_loader.h>
 
+#include "../labutils/vkutil.hpp"
+#include "../labutils/vkobject.hpp"
+#include "../labutils/vkbuffer.hpp"
+#include "../labutils/allocator.hpp" 
+namespace lut = labutils;
+
 /* The structures here are intended to be used during loading only. At runtime,
  * you probably want to use a different set of structures that instead hold e.g.
  * references to the Vulkan resources in which a subset of the data resides. At
@@ -94,4 +100,15 @@ struct ModelData
 	std::vector<glm::vec2> vertexTextureCoords;
 };
 
+// pos and colour buffer for meshes
+struct ColourMesh
+{
+	//vertices info
+	std::vector<lut::Buffer> positions;
+	std::vector<lut::Buffer> normals;
+	std::vector<std::uint32_t> vertexCount;
+};
+
 ModelData load_obj_model( std::string_view const& aOBJPath );
+
+ColourMesh createObjBuffer(ModelData const& aCar, lut::VulkanContext const& aContext, lut::Allocator const& aAllocator);

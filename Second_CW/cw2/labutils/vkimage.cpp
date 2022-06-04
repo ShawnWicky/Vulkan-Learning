@@ -85,10 +85,4 @@ namespace labutils
 		throw Error( "Not yet implemented" ); //TODO- (Section 4) implement me!
 	}
 
-	std::uint32_t compute_mip_level_count( std::uint32_t aWidth, std::uint32_t aHeight )
-	{
-		std::uint32_t const bits = aWidth | aHeight;
-		std::uint32_t const leadingZeros = countl_zero_( bits );
-		return 32-leadingZeros;
-	}
 }

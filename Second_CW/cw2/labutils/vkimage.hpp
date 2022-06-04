@@ -34,5 +34,4 @@ namespace labutils
 
 	Image create_image_texture2d( Allocator const&, std::uint32_t aWidth, std::uint32_t aHeight, VkFormat, VkImageUsageFlags = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT );
 
-	std::uint32_t compute_mip_level_count( std::uint32_t aWidth, std::uint32_t aHeight );
 }
