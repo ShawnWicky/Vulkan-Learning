@@ -80,34 +80,15 @@ namespace labutils
 
 namespace labutils
 {
-	Image create_image( Allocator const& aAllocator, std::uint32_t aWidth, std::uint32_t aHeight, VkFormat aFormat, VkImageUsageFlags aUsage )
+	Image create_image_texture2d( Allocator const& aAllocator, std::uint32_t aWidth, std::uint32_t aHeight, VkFormat aFormat, VkImageUsageFlags aUsage )
 	{
-		VkImageCreateInfo imageInfo{};
-		imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-		imageInfo.imageType = VK_IMAGE_TYPE_2D;
-		imageInfo.format = aFormat;
-		imageInfo.extent.width = aWidth;
-		imageInfo.extent.height = aHeight;
-		imageInfo.extent.depth = 1;
-		imageInfo.mipLevels = 1;
-		imageInfo.arrayLayers = 1;
-		imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-		imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-		imageInfo.usage = aUsage;
-		imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		throw Error( "Not yet implemented" ); //TODO- (Section 4) implement me!
+	}
 
-		VmaAllocationCreateInfo allocInfo{};
-		allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-		VkImage image = VK_NULL_HANDLE;
-		VmaAllocation allocation = VK_NULL_HANDLE;
-
-		if (auto const res = vmaCreateImage(aAllocator.allocator, &imageInfo, &allocInfo, &image, &allocation, nullptr); VK_SUCCESS != res)
-		{
-			throw Error("Unable to allocate image.\n" "vmaCreateImage() returned %s", to_string(res).c_str());
-		}
-
-		return Image(aAllocator.allocator, image, allocation);
+	std::uint32_t compute_mip_level_count( std::uint32_t aWidth, std::uint32_t aHeight )
+	{
+		std::uint32_t const bits = aWidth | aHeight;
+		std::uint32_t const leadingZeros = countl_zero_( bits );
+		return 32-leadingZeros;
 	}
 }

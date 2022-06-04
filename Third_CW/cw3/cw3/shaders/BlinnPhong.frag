@@ -1,13 +1,13 @@
 #version 450
 
-// PBR material (example):
+// Blinn-Phong material (example):
 /*
 layout( set = TODO-SET-ID, binding = TODO-BINDING-ID ) uniform UMaterial
 {
 	vec4 emissive;
-	vec4 albedo;
-	float shininess;
-	float metalness;
+	vec4 diffuse;
+	vec4 specular;
+	float shininess; // Last to make std140 alignment easier.
 } uMaterial;
 */
 
