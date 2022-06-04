@@ -16,7 +16,8 @@ layout(location = 1) in vec3 v2fNormal;
 
 layout(location = 0) out vec4 outPosition;
 layout(location = 1) out vec4 outNormal;
-layout(location = 2) out vec4 outColour;
+layout(location = 2) out vec4 outAlbedo;
+layout(location = 3) out vec4 outEmissive;
 
 // ambient factor
 
@@ -26,5 +27,7 @@ void main()
 
 	outNormal = vec4(v2fNormal, 1.f);
 	
-	outColour = uMaterial.albedo;
+	outAlbedo = vec4(uMaterial.albedo.xyz, uMaterial.metalness);
+
+	outEmissive = vec4(uMaterial.emissive.xyz, uMaterial.shininess);ß
 }
