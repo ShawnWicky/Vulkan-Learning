@@ -1,16 +1,12 @@
 #version 450
+#extension GL_KHR_vulkan_glsl: enable
+layout(set = 0, binding = 0) uniform sampler2D inColour;
 
-// Blinn-Phong material (example):
-/*
-layout( set = TODO-SET-ID, binding = TODO-BINDING-ID ) uniform UMaterial
-{
-	vec4 emissive;
-	vec4 diffuse;
-	vec4 specular;
-	float shininess; // Last to make std140 alignment easier.
-} uMaterial;
-*/
+layout(location = 0) in vec2 inUV;
+
+layout(location = 0) out vec4 outColour;
 
 void main()
-{
+{	
+	outColour = texture(inColour, inUV);
 }
