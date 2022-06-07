@@ -1,43 +1,5 @@
-#include <volk/volk.h>
-
-#include <tuple>
-#include <chrono>
-#include <limits>
-#include <vector>
-#include <stdexcept>
-
-#include <cstdio>
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
-#include <cstring>
-
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-
-#if !defined(GLM_FORCE_RADIANS)
-#	define GLM_FORCE_RADIANS
-#endif
-#include <glm/glm.hpp>
-#include <glm/gtx/transform.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include "../labutils/to_string.hpp"
-#include "../labutils/vulkan_window.hpp"
-
-#include "../labutils/angle.hpp"
-using namespace labutils::literals;
-
-#include "../labutils/error.hpp"
-#include "../labutils/vkutil.hpp"
-#include "../labutils/vkimage.hpp"
-#include "../labutils/vkobject.hpp"
-#include "../labutils/vkbuffer.hpp"
-#include "../labutils/allocator.hpp" 
-namespace lut = labutils;
-
 #include "model.hpp"
-
+#include "deferred.hpp"
 namespace
 {
 	namespace cfg
@@ -282,7 +244,7 @@ int main() try
 
 	// Create VMA allocator
 	lut::Allocator allocator = lut::create_allocator(window);
-
+	#pragma region pixelate pass/pipe/pipe layout
 	// Intialize resources
 	lut::RenderPass firstPass = create_first_render_pass(window);
 	lut::RenderPass secondPass = create_second_render_pass(window);
@@ -298,6 +260,18 @@ int main() try
 	//create pipeline
 	lut::Pipeline firstPipe = create_first_pipeline(window, firstPass.handle, firstPipeLayout.handle); //first render pass
 	lut::Pipeline secondPipe = create_second_pipeline(window, secondPass.handle, secondPipeLayout.handle); // second render pass
+#pragma endregion
+
+	#pragma region deferred pass/pipe/pipe layout
+		lut::RenderPass deferred_first_pass = create_deferred_first_pass(window);
+		lut::RenderPass deferred_second_pass = create_deferred_second_pass(window);
+
+		lut::PipelineLayout deferred_first_layout = create_deferred_first_layout(window, sceneLayout.handle, advancedLayout.handle);
+		lut::PipelineLayout deferred_second_layout = create_deferred_second_layout(window, postLayout.handle);
+
+		lut::Pipeline deferred_first_pipe = create_deferred_first_pipeline(window, deferred_first_pass.handle, deferred_first_layout.handle);
+		lut::Pipeline deferred_second_pipe = create_deferred_second_pipeline(window, deferred_second_pass.handle, deferred_second_layout.handle);
+	#pragma endregion
 	//create depth buffer
 	auto [depthBuffer, depthBufferView] = create_depth_buffer(window, allocator);
 	std::vector<lut::Framebuffer> framebuffers;
@@ -328,7 +302,7 @@ int main() try
 	//create descriptor pool
 	lut::DescriptorPool dpool = lut::create_descriptor_pool(window);
 	
-#pragma region image from first renderpass to second renderpass
+#pragma region piexlate image from first renderpass to second renderpass
 	lut::Sampler defaultSampler = lut::create_default_sampler(window);
 
 	lut::Image image = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, cfg::kImageFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
@@ -354,6 +328,10 @@ int main() try
 	}
 	lut::Framebuffer intermediateBuff;
 	create_intermediate_framebuffers(window, firstPass.handle, intermediateBuff, imageView.handle, depthBufferView.handle);
+#pragma endregion
+
+#pragma region deferred image from first pass to second pass
+
 #pragma endregion
 
 #pragma region secene uniform, light buffer (with thier descriptorSets)
@@ -668,7 +646,7 @@ namespace
 		std::uint32_t aFramebufferHeight)
 	{
 		//delta time
-		float now = glfwGetTime();
+		float now = (float)glfwGetTime();
 		cfg::delta = now - cfg::last;
 		cfg::last = now;
 		//initilize SceneUniform members
@@ -919,38 +897,39 @@ namespace
 
 	}
 
-	void create_intermediate_framebuffers(
-		lut::VulkanWindow const& aWindow,
-		VkRenderPass aRenderPass,
-		lut::Framebuffer& aFramebuffers,
-		VkImageView aImageView,
-		VkImageView aDepthView
-	)
+	void create_swapchain_framebuffers(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, std::vector<lut::Framebuffer>& aFramebuffers, VkImageView aDepthView)
 	{
+		assert(aFramebuffers.empty());
 
-		VkImageView attachments[2] = {
-			aImageView,
-			aDepthView
-		};
-
-		VkFramebufferCreateInfo fbInfo{};
-		fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-		fbInfo.flags = 0;      // normal framebuffer
-		fbInfo.renderPass = aRenderPass;
-		fbInfo.attachmentCount = sizeof(attachments)/sizeof(attachments[0]); //updated
-		fbInfo.pAttachments = attachments;
-		fbInfo.width = aWindow.swapchainExtent.width;
-		fbInfo.height = aWindow.swapchainExtent.height;
-		fbInfo.layers = 1;
-
-		VkFramebuffer fb = VK_NULL_HANDLE;
-		if (auto const res = vkCreateFramebuffer(aWindow.device, &fbInfo, nullptr, &fb); VK_SUCCESS != res)
+		for (int i = 0; i < aWindow.swapViews.size(); i++)
 		{
-			throw lut::Error("Unable to create framebuffer" "vkCreateFramebuffer() returned %s", lut::to_string(res).c_str());
+			VkImageView attachments[2] = {
+				aWindow.swapViews[i],
+				aDepthView
+			};
+
+			VkFramebufferCreateInfo fbInfo{};
+			fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+			fbInfo.flags = 0;      // normal framebuffer
+			fbInfo.renderPass = aRenderPass;
+			fbInfo.attachmentCount = 2; //updated
+			fbInfo.pAttachments = attachments;
+			fbInfo.width = aWindow.swapchainExtent.width;
+			fbInfo.height = aWindow.swapchainExtent.height;
+			fbInfo.layers = 1;
+
+			VkFramebuffer fb = VK_NULL_HANDLE;
+			if (auto const res = vkCreateFramebuffer(aWindow.device, &fbInfo, nullptr, &fb); VK_SUCCESS != res)
+			{
+				throw lut::Error("Unable to create framebuffer for swap chain image %zu\n" "vkCreateFramebuffer() returned %s", i, lut::to_string(res).c_str());
+			}
+			aFramebuffers.emplace_back(lut::Framebuffer(aWindow.device, fb));
 		}
-		aFramebuffers = lut::Framebuffer(aWindow.device, fb);
-		
+
+		assert(aWindow.swapViews.size() == aFramebuffers.size());
 	}
+
+	
 }
 
 //fullscreen render pass functions
@@ -1187,38 +1166,39 @@ namespace
 
 	}
 
-	void create_swapchain_framebuffers(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, std::vector<lut::Framebuffer>& aFramebuffers, VkImageView aDepthView)
+	void create_intermediate_framebuffers(
+		lut::VulkanWindow const& aWindow,
+		VkRenderPass aRenderPass,
+		lut::Framebuffer& aFramebuffers,
+		VkImageView aImageView,
+		VkImageView aDepthView
+	)
 	{
-		assert(aFramebuffers.empty());
 
-		for (int i = 0; i < aWindow.swapViews.size(); i++)
+		VkImageView attachments[2] = {
+			aImageView,
+			aDepthView
+		};
+
+		VkFramebufferCreateInfo fbInfo{};
+		fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		fbInfo.flags = 0;      // normal framebuffer
+		fbInfo.renderPass = aRenderPass;
+		fbInfo.attachmentCount = sizeof(attachments) / sizeof(attachments[0]); //updated
+		fbInfo.pAttachments = attachments;
+		fbInfo.width = aWindow.swapchainExtent.width;
+		fbInfo.height = aWindow.swapchainExtent.height;
+		fbInfo.layers = 1;
+
+		VkFramebuffer fb = VK_NULL_HANDLE;
+		if (auto const res = vkCreateFramebuffer(aWindow.device, &fbInfo, nullptr, &fb); VK_SUCCESS != res)
 		{
-			VkImageView attachments[2] = {
-				aWindow.swapViews[i],
-				aDepthView
-			};
-
-			VkFramebufferCreateInfo fbInfo{};
-			fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-			fbInfo.flags = 0;      // normal framebuffer
-			fbInfo.renderPass = aRenderPass;
-			fbInfo.attachmentCount = 2; //updated
-			fbInfo.pAttachments = attachments;
-			fbInfo.width = aWindow.swapchainExtent.width;
-			fbInfo.height = aWindow.swapchainExtent.height;
-			fbInfo.layers = 1;
-
-			VkFramebuffer fb = VK_NULL_HANDLE;
-			if (auto const res = vkCreateFramebuffer(aWindow.device, &fbInfo, nullptr, &fb); VK_SUCCESS != res)
-			{
-				throw lut::Error("Unable to create framebuffer for swap chain image %zu\n" "vkCreateFramebuffer() returned %s", i, lut::to_string(res).c_str());
-			}
-			aFramebuffers.emplace_back(lut::Framebuffer(aWindow.device, fb));
+			throw lut::Error("Unable to create framebuffer" "vkCreateFramebuffer() returned %s", lut::to_string(res).c_str());
 		}
+		aFramebuffers = lut::Framebuffer(aWindow.device, fb);
 
-		assert(aWindow.swapViews.size() == aFramebuffers.size());
 	}
-
+	
 	lut::DescriptorSetLayout create_scene_descriptor_layout(lut::VulkanWindow const& aWindow)
 	{
 		VkDescriptorSetLayoutBinding bindings[1]{};
