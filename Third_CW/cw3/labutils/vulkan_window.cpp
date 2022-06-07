@@ -580,7 +580,7 @@ namespace
 		}
 
 		VkPhysicalDeviceFeatures deviceFeatures{};
-		//	deviceFeatures.samplerAnisotropy = VK_TRUE;
+		//deviceFeatures.samplerAnisotropy = VK_TRUE;
 			// No extra features for now.
 
 		VkDeviceCreateInfo deviceInfo{};

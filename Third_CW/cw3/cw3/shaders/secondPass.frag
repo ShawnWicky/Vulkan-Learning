@@ -8,5 +8,10 @@ layout(location = 0) out vec4 outColour;
 
 void main()
 {	
-	outColour = texture(inColour, inUV);
+        float Pixels = 500.0;
+        float dx = 8.0 * (1.0 / Pixels);
+        float dy = 8.0 * (1.0 / Pixels);
+        vec2 Coord = vec2(dx * floor(inUV.x / dx),
+                          dy * floor(inUV.y / dy));
+        outColour = texture(inColour, Coord);
 }

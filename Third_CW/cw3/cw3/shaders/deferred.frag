@@ -33,10 +33,12 @@ void main()
 	//pass info from G-buffer
 	vec3 fragPos = texture(TexPos, inUV).xyz;
 	vec3 fragNorm = texture(TexNorm, inUV).xyz;
-	vec3 fragEmissive = texture(TexEmissive, inUV).xyz;
-	vec3 fragAlbedo = texture(TexAlbedo, inUV).xyz;
-	float fragShininess = texture(TexEmissive, inUV).w;
-	float fragMetalness = texture(TexAlbedo, inUV).w;
+	vec4 rawEmissive = texture(TexEmissive, inUV);
+	vec4 rawAlbedo = texture(TexAlbedo, inUV);
+	vec3 fragEmissive = rawEmissive.xyz;
+	float fragShininess = rawEmissive.w;
+	vec3 fragAlbedo = rawAlbedo.xyz;
+	float fragMetalness = rawAlbedo.w;
 	
 	//modular code
 	const float PI = 3.1415926f;
@@ -85,5 +87,6 @@ void main()
 		fragColour += vec4(Lspec, 1.f);
 	}
 
-	oColour =  fragColour;
+	oColour = fragColour;
+
 }
