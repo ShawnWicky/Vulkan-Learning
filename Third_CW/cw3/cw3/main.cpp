@@ -81,9 +81,9 @@ namespace
 
 		constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 		constexpr VkFormat kPositionFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-		constexpr VkFormat kNormalFormat = VK_FORMAT_R8G8B8A8_SRGB;
-		constexpr VkFormat kEmissiveFormat = VK_FORMAT_R8G8B8A8_SRGB;
-		constexpr VkFormat kAlbedoFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+		constexpr VkFormat kNormalFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+		constexpr VkFormat kEmissiveFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+		constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;
 	}
 
 	// Local types/structures:
@@ -162,7 +162,7 @@ namespace
 	///-----------------------------------------------------------------------
 	/// Load Obj files
 	///-----------------------------------------------------------------------
-	ModelData newShip = load_obj_model(cfg::kNewMaterialtestPath);
+	ModelData newShip = load_obj_model(cfg::kNewShipPath);
 
 	// Local functions:
 	// GLFW callbacks
@@ -332,6 +332,8 @@ int main() try
 	lut::DescriptorPool dpool = lut::create_descriptor_pool(window);
 	
 #pragma region deferred image from first pass to second pass
+	lut::Sampler defaultSampler = lut::create_default_sampler(window);
+
 	lut::Image posImage = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, deferred::kPositionFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 	lut::ImageView posView = lut::create_image_view(window, posImage.image, deferred::kPositionFormat);
 
@@ -1042,6 +1044,38 @@ namespace
 		aFramebuffers = lut::Framebuffer(aWindow.device, fb);
 
 	}
+
+	void create_swapchain_framebuffers(lut::VulkanWindow const& aWindow, VkRenderPass aRenderPass, std::vector<lut::Framebuffer>& aFramebuffers, VkImageView aDepthView)
+	{
+		assert(aFramebuffers.empty());
+
+		for (int i = 0; i < aWindow.swapViews.size(); i++)
+		{
+			VkImageView attachments[2] = {
+				aWindow.swapViews[i],
+				aDepthView
+			};
+
+			VkFramebufferCreateInfo fbInfo{};
+			fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+			fbInfo.flags = 0;      // normal framebuffer
+			fbInfo.renderPass = aRenderPass;
+			fbInfo.attachmentCount = 2; //updated
+			fbInfo.pAttachments = attachments;
+			fbInfo.width = aWindow.swapchainExtent.width;
+			fbInfo.height = aWindow.swapchainExtent.height;
+			fbInfo.layers = 1;
+
+			VkFramebuffer fb = VK_NULL_HANDLE;
+			if (auto const res = vkCreateFramebuffer(aWindow.device, &fbInfo, nullptr, &fb); VK_SUCCESS != res)
+			{
+				throw lut::Error("Unable to create framebuffer for swap chain image %zu\n" "vkCreateFramebuffer() returned %s", i, lut::to_string(res).c_str());
+			}
+			aFramebuffers.emplace_back(lut::Framebuffer(aWindow.device, fb));
+		}
+
+		assert(aWindow.swapViews.size() == aFramebuffers.size());
+	}
 }
 
 //deferred second pass
@@ -1244,6 +1278,182 @@ namespace
 		return lut::Pipeline(aWindow.device, pipe);
 	}
 
+	void record_commands(
+		VkCommandBuffer aCmdBuff,
+		VkRenderPass aFullscreenPass,
+		VkRenderPass aPostPass,
+		VkFramebuffer aSwapChainFramebuffer,
+		VkFramebuffer aIntermediatebuff,
+		VkPipeline aFullscreenPipe,
+		VkPipeline aPostPipe,
+		VkExtent2D const& aImageExtent,
+		ColourMesh& aColourMesh,
+
+		VkBuffer aSceneUBO,
+		std::vector<lut::Buffer>& aPBR,
+		glsl::SceneUniform const& aSceneUniform,
+
+		VkPipelineLayout aFullscreenLayout,
+		VkPipelineLayout aPostLayout,
+		VkDescriptorSet aSceneDescriptors,
+		VkDescriptorSet aImageDescriptors,
+		std::vector<VkDescriptorSet> aPBRDescriptors
+		///------------------------------------
+	)
+	{
+		VkCommandBufferBeginInfo begInfo{};
+		begInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		begInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;  // we use one time here
+		begInfo.pInheritanceInfo = nullptr;
+
+		if (auto const res = vkBeginCommandBuffer(aCmdBuff, &begInfo); VK_SUCCESS != res)
+		{
+			throw lut::Error("Unable to begin recording command buffer\n" "vkBeginCommandBuffer() returned %s", lut::to_string(res).c_str());
+		}
+
+		//upload scene uniforms
+		//we need two barriers here
+		lut::buffer_barrier(aCmdBuff, aSceneUBO, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+		vkCmdUpdateBuffer(aCmdBuff, aSceneUBO, 0, sizeof(glsl::SceneUniform), &aSceneUniform);
+		lut::buffer_barrier(aCmdBuff, aSceneUBO, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT);
+
+		for (int i = 0; i < aPBR.size(); i++)
+		{
+			glsl::PBRuniform pbrUniforms{};
+			pbrUniforms.albedo = glm::vec4(newShip.materials[i].albedo, 1.f);
+			pbrUniforms.emissive = glm::vec4(newShip.materials[i].emissive, 1.f);
+			pbrUniforms.metalness = newShip.materials[i].metalness;
+			pbrUniforms.shininess = newShip.materials[i].shininess;
+
+			lut::buffer_barrier(aCmdBuff, aPBR[i].buffer, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+			vkCmdUpdateBuffer(aCmdBuff, aPBR[i].buffer, 0, sizeof(glsl::PBRuniform), &pbrUniforms);
+			lut::buffer_barrier(aCmdBuff, aPBR[i].buffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+		}
+		//first render pass
+
+		{
+			//Render Pass
+			VkClearValue clearValues[5]{};
+			clearValues[0].color = { {0.1f, 0.1f, 0.1f, 1.f} };
+			clearValues[1].color = { {0.1f, 0.1f, 0.1f, 1.f} };
+			clearValues[2].color = { {0.1f, 0.1f, 0.1f, 1.f} };
+			clearValues[3].color = { {0.1f, 0.1f, 0.1f, 1.f} };
+			clearValues[4].depthStencil.depth = 1.0f;
+
+			VkRenderPassBeginInfo passInfo{};
+			passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+			passInfo.renderPass = aFullscreenPass;
+			passInfo.framebuffer = aIntermediatebuff;
+			passInfo.renderArea.offset = VkOffset2D{ 0, 0 };
+			passInfo.renderArea.extent = aImageExtent;
+			passInfo.clearValueCount = sizeof(clearValues) / sizeof(clearValues[0]);
+			passInfo.pClearValues = clearValues;
+
+			vkCmdBeginRenderPass(aCmdBuff, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aFullscreenLayout, 0, 1, &aSceneDescriptors, 0, nullptr);
+			//----------------------------------
+
+			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aFullscreenPipe);
+			// Bind vertex input
+			for (int i = 0; i < aColourMesh.positions.size(); i++)
+			{
+				vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aFullscreenLayout, 1, 1, &aPBRDescriptors[newShip.meshes[i].materialIndex], 0, nullptr);
+
+				auto& pos = aColourMesh.positions;
+				auto& norm = aColourMesh.normals;
+				VkBuffer buffers[2] = { pos[i].buffer, norm[i].buffer };
+				VkDeviceSize offsets[2]{};
+				vkCmdBindVertexBuffers(aCmdBuff, 0, 2, buffers, offsets);
+				vkCmdDraw(aCmdBuff, aColourMesh.vertexCount[i], 1, 0, 0);
+			}
+
+			vkCmdEndRenderPass(aCmdBuff);
+		}
+
+		//second render pass
+		{
+			//Render Pass
+			VkClearValue clearValues[2]{};
+			clearValues[0].color = { {0.1f, 0.1f, 0.1f, 1.f} };
+			clearValues[1].depthStencil.depth = 1.0f;
+
+			VkRenderPassBeginInfo passInfo{};
+			passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+			passInfo.renderPass = aPostPass;
+			passInfo.framebuffer = aSwapChainFramebuffer;
+			passInfo.renderArea.offset = VkOffset2D{ 0, 0 };
+			passInfo.renderArea.extent = aImageExtent;
+			passInfo.clearValueCount = 2;
+			passInfo.pClearValues = clearValues;
+
+			vkCmdBeginRenderPass(aCmdBuff, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aFullscreenLayout, 0, 1, &aSceneDescriptors, 0, nullptr);
+
+			vkCmdBindDescriptorSets(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aPostLayout, 1, 1, &aImageDescriptors, 0, nullptr);
+			//----------------------------------
+
+			vkCmdBindPipeline(aCmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, aPostPipe);
+
+			vkCmdDraw(aCmdBuff, 3, 1, 0, 0);
+			vkCmdEndRenderPass(aCmdBuff);
+		}
+
+		//end recording
+		if (auto const res = vkEndCommandBuffer(aCmdBuff); VK_SUCCESS != res)
+		{
+			throw lut::Error("Unable to end recording command buffer\n" "vkEndCommandBuffer() returned %s", lut::to_string(res).c_str());
+		}
+
+
+
+	}
+
+	void submit_commands(lut::VulkanWindow const& aWindow, VkCommandBuffer aCmdBuff, VkFence aFence, VkSemaphore aWaitSemaphore, VkSemaphore aSignalSemaphore)
+	{
+		//throw lut::Error( "Not yet implemented" ); //TODO: (Section 1/Exercise 3) implement me!
+		VkPipelineStageFlags waitPipelineStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &aCmdBuff;
+
+		submitInfo.waitSemaphoreCount = 1;
+		submitInfo.pWaitSemaphores = &aWaitSemaphore;
+		submitInfo.pWaitDstStageMask = &waitPipelineStages;
+
+		submitInfo.signalSemaphoreCount = 1;
+		submitInfo.pSignalSemaphores = &aSignalSemaphore;
+		if (auto const res = vkQueueSubmit(aWindow.graphicsQueue, 1, &submitInfo, aFence); VK_SUCCESS != res)
+		{
+			throw lut::Error("Unable to submit command buffer to queue\n" "vkQueueSubmit() returned %s", lut::to_string(res).c_str());
+		}
+	}
+
+	void present_results(VkQueue aPresentQueue, VkSwapchainKHR aSwapchain, std::uint32_t aImageIndex, VkSemaphore aRenderFinished, bool& aNeedToRecreateSwapchain)
+	{
+		//throw lut::Error( "Not yet implemented" ); //TODO: (Section 1/Exercise 3) implement me!
+		VkPresentInfoKHR presentInfo{};
+		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+		presentInfo.waitSemaphoreCount = 1;
+		presentInfo.pWaitSemaphores = &aRenderFinished;
+		presentInfo.swapchainCount = 1;
+		presentInfo.pSwapchains = &aSwapchain;
+		presentInfo.pImageIndices = &aImageIndex;
+		presentInfo.pResults = nullptr;
+
+		auto const presentRes = vkQueuePresentKHR(aPresentQueue, &presentInfo);
+
+		if (VK_SUBOPTIMAL_KHR == presentRes || VK_ERROR_OUT_OF_DATE_KHR == presentRes)
+		{
+			aNeedToRecreateSwapchain = true;
+		}
+		else if (VK_SUCCESS != presentRes)
+		{
+			throw lut::Error("Unable present swapchain image %u\n" "vkQueuePresentKHR() returned %s", aImageIndex, lut::to_string(presentRes).c_str());
+		}
+	}
 }
 
 //DescriptorSet Layout
