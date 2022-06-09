@@ -485,28 +485,98 @@ int main() try
 			// re-create swapchain and associated resources - see Exercise 3!
 			vkDeviceWaitIdle(window.device);
 			auto const changes = lut::recreate_swapchain(window);
+
+
+			//TODO: (Section 6) re-create depth buffer image
+			if (changes.changedSize)
+			{
+				std::tie(depthBuffer, depthBufferView) = create_depth_buffer(window, allocator);
+
+				posImage = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, deferred::kPositionFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+				posView = lut::create_image_view(window, posImage.image, deferred::kPositionFormat);
+
+				normImage = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, deferred::kNormalFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+				normView = lut::create_image_view(window, normImage.image, deferred::kNormalFormat);
+
+				emissiveImage = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, deferred::kEmissiveFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+				emissiveView = lut::create_image_view(window, emissiveImage.image, deferred::kEmissiveFormat);
+
+				albedoImage = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, deferred::kAlbedoFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+				albedoView = lut::create_image_view(window, albedoImage.image, deferred::kAlbedoFormat);
+
+				{
+					VkWriteDescriptorSet desc[4]{};
+					VkDescriptorImageInfo posInfo{};
+					posInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					posInfo.imageView = posView.handle;
+					posInfo.sampler = defaultSampler.handle;
+
+					VkDescriptorImageInfo normInfo{};
+					normInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					normInfo.imageView = normView.handle;
+					normInfo.sampler = defaultSampler.handle;
+
+					VkDescriptorImageInfo emissiveInfo{};
+					emissiveInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					emissiveInfo.imageView = emissiveView.handle;
+					emissiveInfo.sampler = defaultSampler.handle;
+
+					VkDescriptorImageInfo albedoInfo{};
+					albedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					albedoInfo.imageView = albedoView.handle;
+					albedoInfo.sampler = defaultSampler.handle;
+
+					desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+					desc[0].dstSet = deferredDescriptors;
+					desc[0].dstBinding = 0;
+					desc[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+					desc[0].descriptorCount = 1;
+					desc[0].pImageInfo = &posInfo;
+
+					desc[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+					desc[1].dstSet = deferredDescriptors;
+					desc[1].dstBinding = 1;
+					desc[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+					desc[1].descriptorCount = 1;
+					desc[1].pImageInfo = &normInfo;
+
+					desc[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+					desc[2].dstSet = deferredDescriptors;
+					desc[2].dstBinding = 2;
+					desc[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+					desc[2].descriptorCount = 1;
+					desc[2].pImageInfo = &emissiveInfo;
+
+					desc[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+					desc[3].dstSet = deferredDescriptors;
+					desc[3].dstBinding = 3;
+					desc[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+					desc[3].descriptorCount = 1;
+					desc[3].pImageInfo = &albedoInfo;
+
+					constexpr auto numSets = sizeof(desc) / sizeof(desc[0]);
+					vkUpdateDescriptorSets(window.device, numSets, desc, 0, nullptr);
+				}
+			}
+
 			if (changes.changedFormat)
 			{
 				deferred_first_pass = create_deferred_first_pass(window);
 				deferred_second_pass = create_deferred_second_pass(window);
 			}
 
+
+			framebuffers.clear();
+
+			create_deferred_framebuffers(window, deferred_first_pass.handle, deferredBuff, posView.handle, normView.handle, emissiveView.handle ,albedoView.handle, depthBufferView.handle);
+			create_swapchain_framebuffers(window, deferred_second_pass.handle, framebuffers, depthBufferView.handle);
+			
 			if (changes.changedSize)
 			{
 				lut::Pipeline fullScreenPipe = create_deferred_first_pipeline(window, deferred_first_pass.handle, deferred_first_layout.handle);
 				lut::Pipeline secondPipe = create_deferred_second_pipeline(window, deferred_second_pass.handle, deferred_second_layout.handle);
 			}
-			//TODO: (Section 6) re-create depth buffer image
-			if (changes.changedSize)
-			{
-				std::tie(depthBuffer, depthBufferView) = create_depth_buffer(window, allocator);
-			}
 
-			framebuffers.clear();
-			//vkDestroyFramebuffer(window.device,intermediateBuff.handle,allocator.allocator);
-			create_deferred_framebuffers(window, deferred_first_pass.handle, deferredBuff, posView.handle, normView.handle, emissiveView.handle ,albedoView.handle, depthBufferView.handle);
-			create_swapchain_framebuffers(window, deferred_second_pass.handle, framebuffers, depthBufferView.handle);
-			
 			recreateSwapchain = false;
 			continue;
 		}
@@ -829,6 +899,7 @@ namespace
 		passInfo.pSubpasses = subpasses;     //Supass Definition
 		passInfo.dependencyCount = sizeof(dependencies) / sizeof(dependencies[0]);
 		passInfo.pDependencies = dependencies;
+
 
 		VkRenderPass rpass = VK_NULL_HANDLE;
 		if (auto const res = vkCreateRenderPass(aWindow.device, &passInfo, nullptr, &rpass); VK_SUCCESS != res)
