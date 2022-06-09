@@ -15,3 +15,7 @@ void main()
                           dy * floor(inUV.y / dy));
         outColour = texture(inColour, Coord);
 }
+
+//-------------------------------------------
+//pixelate shader(not used)
+//-------------------------------------------

@@ -434,7 +434,7 @@ int main() try
 	}
 #pragma endregion
 
-#pragma region 2.3 material uniform buffers and descriptors
+#pragma region material uniform buffers and descriptors
 	std::vector<lut::Buffer> pbrBuffers(newShip.materials.size());
 	std::vector<VkDescriptorSet> pbrDescriptors(newShip.materials.size());
 	for (int i = 0; i < newShip.materials.size(); i++)

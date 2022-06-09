@@ -1,6 +1,11 @@
 #version 450
 
 
+//-------------------------------------------
+//pixelate shader(not used)
+//-------------------------------------------
+
+
 // PBR material (example):
 layout( set = 1, binding = 0, std140 ) uniform UMaterial
 {
@@ -85,3 +90,5 @@ void main()
 
 	outColour =  fragColour;
 }
+
+
