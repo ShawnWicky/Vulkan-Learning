@@ -13,13 +13,15 @@ layout(set = 0, binding = 0) uniform UScene
 			mat4 camera;
 			mat4 projection;
 			mat4 projCam;
+			mat4 viewInv;
+			mat4 projectionInv;
 			Light light[4];
 			vec3 camPos;
 			int constant;
 
 } uScene;
 
-layout(set = 1, binding = 0) uniform sampler2D TexPos;
+layout(set = 1, binding = 0) uniform sampler2D TexDepth;
 layout(set = 1, binding = 1) uniform sampler2D TexNorm;
 layout(set = 1, binding = 2) uniform sampler2D TexEmissive;
 layout(set = 1, binding = 3) uniform sampler2D TexAlbedo;
@@ -28,10 +30,30 @@ layout(location = 0) in vec2 inUV;
 
 layout(location = 0) out vec4 oColour;
 
+
+
+vec3 GetWorldPos(float depth) {
+    float z = depth * 2.0 - 1.0;
+
+    vec4 clipSpacePosition = vec4(inUV * 2.0 - 1.0, z, 1.0);
+    vec4 viewSpacePosition = uScene.projectionInv * clipSpacePosition;
+
+    // Perspective division
+    viewSpacePosition /= viewSpacePosition.w;
+
+    vec4 worldSpacePosition = uScene.viewInv * viewSpacePosition;
+
+    return worldSpacePosition.xyz;
+}
+
+
+
 void main()
 {
 	//pass info from G-buffer
-	vec3 fragPos = texture(TexPos, inUV).xyz;
+	float fragDepth= texture(TexDepth, inUV).x;
+	vec3 fragPos = GetWorldPos(fragDepth);
+
 	vec3 fragNorm = texture(TexNorm, inUV).xyz;
 	vec4 rawEmissive = texture(TexEmissive, inUV);
 	vec4 rawAlbedo = texture(TexAlbedo, inUV);

@@ -84,6 +84,7 @@ namespace
 		constexpr VkFormat kNormalFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 		constexpr VkFormat kEmissiveFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 		constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;
+		constexpr VkFormat kDepthViewFormat = VK_FORMAT_R8G8B8A8_SRGB;
 	}
 
 	// Local types/structures:
@@ -140,6 +141,8 @@ namespace
 			glm::mat4 camera;
 			glm::mat4 projection;
 			glm::mat4 projCam;
+			glm::mat4 viewInv;
+			glm::mat4 projectionInv;
 			Light lights[4];
 			alignas(16)	glm::vec3 camPos;
 			int constant;
@@ -334,8 +337,11 @@ int main() try
 #pragma region deferred image from first pass to second pass
 	lut::Sampler defaultSampler = lut::create_default_sampler(window);
 
-	lut::Image posImage = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, deferred::kPositionFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-	lut::ImageView posView = lut::create_image_view(window, posImage.image, deferred::kPositionFormat);
+	//lut::Image posImage = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, deferred::kPositionFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	//lut::ImageView posView = lut::create_image_view(window, posImage.image, deferred::kPositionFormat);
+
+	lut::Image posImage = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, deferred::kDepthViewFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	lut::ImageView posView = lut::create_image_view(window, posImage.image, deferred::kDepthViewFormat);
 
 	lut::Image normImage = lut::create_image(allocator, window.swapchainExtent.width, window.swapchainExtent.height, deferred::kNormalFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 	lut::ImageView normView = lut::create_image_view(window, normImage.image, deferred::kNormalFormat);
@@ -434,7 +440,7 @@ int main() try
 	}
 #pragma endregion
 
-#pragma region 2.3 material uniform buffers and descriptors
+#pragma region material uniform buffers and descriptors
 	std::vector<lut::Buffer> pbrBuffers(newShip.materials.size());
 	std::vector<VkDescriptorSet> pbrDescriptors(newShip.materials.size());
 	for (int i = 0; i < newShip.materials.size(); i++)
@@ -504,7 +510,7 @@ int main() try
 
 			framebuffers.clear();
 			//vkDestroyFramebuffer(window.device,intermediateBuff.handle,allocator.allocator);
-			create_deferred_framebuffers(window, deferred_first_pass.handle, deferredBuff, posView.handle, normView.handle, emissiveView.handle ,albedoView.handle, depthBufferView.handle);
+			create_deferred_framebuffers(window, deferred_first_pass.handle, deferredBuff, depthBufferView.handle, normView.handle, emissiveView.handle ,albedoView.handle, depthBufferView.handle);
 			create_swapchain_framebuffers(window, deferred_second_pass.handle, framebuffers, depthBufferView.handle);
 			
 			recreateSwapchain = false;
@@ -731,6 +737,8 @@ namespace
 		aSceneUniforms.projection[1][1] *= -1.f;
 		aSceneUniforms.camera = camera.getViewMatrix();
 		aSceneUniforms.camPos = camera.position;
+		aSceneUniforms.viewInv = glm::inverse(aSceneUniforms.camera);
+		aSceneUniforms.projectionInv = glm::inverse(aSceneUniforms.projection);
 		//aSceneUniforms.camPos = aSceneUniforms.projection * aSceneUniforms.view * aSceneUniforms.model;
 		aSceneUniforms.projCam = aSceneUniforms.projection * aSceneUniforms.camera;
 
@@ -751,7 +759,7 @@ namespace
 	{
 		//Render Pass attachments
 		VkAttachmentDescription attachments[5]{};
-		attachments[0].format = deferred::kPositionFormat;
+		attachments[0].format = deferred::kDepthViewFormat;
 		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
 		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1652,5 +1660,6 @@ namespace
 
 		return { std::move(depthImage), lut::ImageView(aWindow.device, view) };
 	}
+
 }
 //EOF vim:syntax=cpp:foldmethod=marker:ts=4:noexpandtab: 
